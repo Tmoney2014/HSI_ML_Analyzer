@@ -64,6 +64,7 @@ def select_best_bands(data_cube, n_bands=5, method='pca'):
                 break
                 
     result_list = sorted(list(selected_band_indices))[:n_bands]
-    print(f"   [Band Selection] 최종 선택된 밴드: {result_list}")
+    display_list = [x + 1 for x in result_list]
+    print(f"   [Band Selection] 최종 선택된 밴드(Display 1-based): {display_list}")
     
     return result_list

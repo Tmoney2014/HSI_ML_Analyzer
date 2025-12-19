@@ -103,7 +103,8 @@ class TrainingViewModel(QObject):
             dummy_cube = X_train[:min(5000, X_train.shape[0])].reshape(-1, 1, X_train.shape[1])
             selected_bands = select_best_bands(dummy_cube, n_bands=5)
             
-            self.log_message.emit(f"Selected Bands: {selected_bands}")
+            display_bands = [b + 1 for b in selected_bands]
+            self.log_message.emit(f"Selected Bands (1-based): {display_bands}")
             
             # Subset to selected bands
             X_train_sub = X_train[:, selected_bands]
