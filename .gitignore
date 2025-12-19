@@ -1,1 +1,62 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+venv/
+env/
+ENV/
+.env
+.venv
+
+# --- IDEs ---
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.idea/
+
+# --- HSI Data (Large Files) ---
+# Hyperspectral images are huge, don't commit them
+*.hdr
+*.img
+*.raw
+*.bil
+*.bip
+*.bsq
+*.dat
+*.npy
+*.npz
+*.mat
+
+# --- Application Specific ---
+# User session & local config
 session_config.json
+*.log
+output/
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+desktop.ini
