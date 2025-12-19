@@ -1,28 +1,30 @@
 {
     "ModelType": "LinearSVM",
     "SelectedBands": [
-        0,
-        44,
-        90,
-        91,
-        92
+        34,
+        39,
+        45,
+        105,
+        137
     ],
     "Weights": [
-        0.09224896785961172,
-        -0.07418176746568055,
-        -0.0491338872725391,
-        0.18146727695445367,
-        0.02460951709527426
+        0.258080466523703,
+        -0.6324891116926276,
+        1.7225211326238812,
+        -0.5394540792497976,
+        -0.7337584816232325
     ],
-    "Bias": 0.02923988139251012,
+    "Bias": -0.6335188280880532,
     "Preprocessing": {
-        "BackgroundThreshold": 3979,
-        "ApplySG": false,
-        "SGWindow": 5,
+        "ApplySG": true,
+        "SGWin": 9,
+        "SGPoly": 2,
         "ApplyL2": true,
-        "ApplyMinMax": false,
-        "ApplySNV": true,
-        "ApplyCentering": false
+        "ApplyMinMax": true,
+        "ApplySNV": false,
+        "ApplyCenter": false,
+        "Mode": "Raw",
+        "MaskRules": "b80 > 33000"
     },
     "Note": "\ud310\uc815 \uacf5\uc2dd: Score = sum(w*x) + b. \ub9cc\uc57d Score > 0 \uc774\uba74 '\ubd88\ub7c9(Class 1)' \uc785\ub2c8\ub2e4."
 }

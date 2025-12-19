@@ -1,25 +1,105 @@
 import numpy as np
 from scipy.signal import savgol_filter
 
-def create_background_mask(cube, threshold=0.1):
+def create_background_mask(cube, threshold=0.1, band_index=None):
     """
-    이미지의 평균 밝기를 기준으로 배경 마스크를 생성합니다.
+    이미지의 밝기를 기준으로 배경 마스크를 생성합니다. (단일 밴드, 평균, 또는 복합 규칙)
     
     Args:
         cube: (H, W, Bands) 형태의 3차원 데이터
-        threshold: 배경으로 간주할 밝기 임계값 (0.0 ~ 1.0)
-                   이 값보다 어두우면 배경(0), 밝으면 물체(1)로 처리
+        threshold: 단순 모드에서 사용할 밝기 임계값
+        band_index: 
+            - None: 전체 평균 사용
+            - int: 해당 밴드 인덱스 사용
+            - str: 복합 규칙 문자열 (예: "80>0.1; 130<0.3")
+                   사용 가능한 연산자: >, <, >=, <=
+                   구분자: ; (세미콜론)
                    
     Returns:
         mask: (H, W) 형태의 2차원 부울(Boolean) 배열
-              True(1): 물체, False(0): 배경
     """
-    # 밴드 전체의 평균 밝기를 계산 (단순 평균)
-    mean_image = np.mean(cube, axis=2)
+    H, W, B = cube.shape
     
-    # 임계값보다 큰 픽셀만 True (물체)
-    mask = mean_image > threshold
+    import re
+
+    # 1. 복합 규칙 문자열 처리 (Advanced String Rules with & |)
+    if isinstance(band_index, str) and any(op in band_index for op in ['>', '<']):
+        try:
+            # 정규표현식으로 "b숫자 연산자 숫자" 패턴 찾기 (예: b80 > 0.1)
+            # [bB]? : 옵션 'b' 접두사
+            # (\d+) : 밴드 인덱스 (Group 1)
+            # ([><=]+) : 연산자 (Group 2)
+            # ([\d.]+(?:[eE][+-]?\d+)?) : 실수 값 (Group 3)
+            pattern = r'[bB]?(\d+)\s*([><=]+)\s*([\d.]+(?:[eE][+-]?\d+)?)'
+            
+            # 모든 조건을 찾아서 미리 마스크 계산
+            matches = list(re.finditer(pattern, band_index))
+            mask_dict = {}
+            processed_rule = band_index
+            
+            for i, match in enumerate(matches):
+                full_expr = match.group(0)
+                idx = int(match.group(1))
+                op = match.group(2)
+                val = float(match.group(3))
+                
+                # 마스크 키 생성 (eval에서 사용할 변수명)
+                key = f"MASK_{i}"
+                
+                # 마스크 계산
+                if 0 <= idx < B:
+                    band_img = cube[:, :, idx]
+                    if op == '>=': sub_mask = band_img >= val
+                    elif op == '<=': sub_mask = band_img <= val
+                    elif op == '>': sub_mask = band_img > val
+                    elif op == '<': sub_mask = band_img < val
+                    else: sub_mask = np.zeros((H, W), dtype=bool) # Fallback
+                else:
+                    sub_mask = np.zeros((H, W), dtype=bool) # Invalid Band
+                
+                mask_dict[key] = sub_mask
+                
+                # 원본 문자열에서 해당 조건식을 변수명으로 치환
+                # 단순 replace는 중복 발생 시 위험하므로, span을 이용하거나 주의 필요.
+                # 여기서는 match된 정확한 부분 문자열을 replace (가장 안전하게는 역순 치환이 좋음)
+                pass 
+            
+            # 안전한 치환을 위해 역순으로 처리
+            matches.reverse()
+            for i, match in enumerate(matches):
+                # i는 역순이므로 원래 인덱스는 len-1-i
+                original_idx = len(matches) - 1 - i
+                key = f"MASK_{original_idx}"
+                start, end = match.span()
+                processed_rule = processed_rule[:start] + key + processed_rule[end:]
+                
+            # eval 사용하여 논리 연산 수행 (&, |)
+            # 예: "MASK_0 & MASK_1 | MASK_2"
+            final_mask = eval(processed_rule, {"__builtins__": None}, mask_dict)
+            
+            return final_mask.astype(bool)
+
+        except Exception as e:
+            print(f"Mask Rule Parse Error: {e}")
+            # 에러 발생 시 평균 기준 Fallback
+            criterion_image = np.mean(cube, axis=2)
+            mask = criterion_image > threshold
+            return mask
+
+    # 2. 단일 밴드 인덱스 (Single Band Mode)
+    elif isinstance(band_index, int) or (isinstance(band_index, str) and band_index.isdigit()):
+        idx = int(band_index)
+        if 0 <= idx < B:
+            criterion_image = cube[:, :, idx]
+        else:
+            criterion_image = np.mean(cube, axis=2)
+            
+    # 3. 기본값 (Default: Mean Intensity)
+    else:
+        criterion_image = np.mean(cube, axis=2)
     
+    # 임계값 적용
+    mask = criterion_image > threshold
     return mask
 
 def apply_mask(cube, mask):
