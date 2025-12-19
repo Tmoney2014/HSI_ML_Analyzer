@@ -18,6 +18,6 @@ pip install -r requirements.txt
 
 echo.
 echo [Info] Starting GUI Application...
-python app.py
+python main.py
 
 pause
