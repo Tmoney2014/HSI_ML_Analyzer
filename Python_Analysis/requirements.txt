@@ -3,3 +3,5 @@ pandas
 scikit-learn
 spectral
 matplotlib
+scipy
+PyQt5
