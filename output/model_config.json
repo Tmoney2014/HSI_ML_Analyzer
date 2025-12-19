@@ -1,30 +1,29 @@
 {
     "ModelType": "LinearSVM",
     "SelectedBands": [
-        34,
-        39,
-        45,
-        105,
-        137
+        42,
+        43,
+        90,
+        92,
+        105
     ],
     "Weights": [
-        0.258080466523703,
-        -0.6324891116926276,
-        1.7225211326238812,
-        -0.5394540792497976,
-        -0.7337584816232325
+        -1.02358269028681,
+        0.1472379433866317,
+        0.2629572426484993,
+        -0.2831462355181418,
+        -1.013562356889626
     ],
-    "Bias": -0.6335188280880532,
-    "Preprocessing": {
-        "ApplySG": true,
-        "SGWin": 9,
-        "SGPoly": 2,
-        "ApplyL2": true,
-        "ApplyMinMax": true,
-        "ApplySNV": false,
-        "ApplyCenter": false,
-        "Mode": "Raw",
-        "MaskRules": "b80 > 33000"
-    },
-    "Note": "\ud310\uc815 \uacf5\uc2dd: Score = sum(w*x) + b. \ub9cc\uc57d Score > 0 \uc774\uba74 '\ubd88\ub7c9(Class 1)' \uc785\ub2c8\ub2e4."
+    "Bias": 1.0155760518954269,
+    "Preprocessing": [
+        {
+            "name": "L2",
+            "params": {}
+        },
+        {
+            "name": "MinMax",
+            "params": {}
+        }
+    ],
+    "Note": "Score = sum(w*x) + b. If Score > 0 then Class 1 (Defect)."
 }
