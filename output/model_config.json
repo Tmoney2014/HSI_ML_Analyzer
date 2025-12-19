@@ -1,29 +1,30 @@
 {
     "ModelType": "LinearSVM",
     "SelectedBands": [
+        0,
         42,
         43,
-        90,
-        92,
-        105
+        44,
+        97
     ],
     "Weights": [
-        -1.02358269028681,
-        0.1472379433866317,
-        0.2629572426484993,
-        -0.2831462355181418,
-        -1.013562356889626
+        -0.007632506088765497,
+        -1.9589214200004825,
+        0.712677725930466,
+        0.004993171238865425,
+        -0.4409707348870622
     ],
-    "Bias": 1.0155760518954269,
-    "Preprocessing": [
-        {
-            "name": "L2",
-            "params": {}
-        },
-        {
-            "name": "MinMax",
-            "params": {}
-        }
-    ],
-    "Note": "Score = sum(w*x) + b. If Score > 0 then Class 1 (Defect)."
+    "Bias": 0.5402464806857208,
+    "Preprocessing": {
+        "ApplySG": true,
+        "SGWin": 7,
+        "SGPoly": 2,
+        "ApplyL2": true,
+        "ApplyMinMax": true,
+        "ApplySNV": false,
+        "ApplyCenter": false,
+        "Mode": "Raw",
+        "MaskRules": "b80 > 4000"
+    },
+    "Note": "판정 공식: Score = sum(w*x) + b. 만약 Score > 0 이면 '불량(Class 1)' 입니다."
 }
