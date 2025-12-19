@@ -21,6 +21,9 @@ class MainWindow(QMainWindow):
         self.analysis_vm = AnalysisViewModel(self.main_vm)
         self.training_vm = TrainingViewModel(self.main_vm, self.analysis_vm)
         
+        # Connect Save Signal
+        self.main_vm.save_requested.connect(self.save_session_manual)
+        
         # 2. UI Setup
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -54,6 +57,11 @@ class MainWindow(QMainWindow):
         self.tab_analysis.close_all_windows()
         event.accept()
 
+    def save_session_manual(self):
+        if self.save_session():
+             from PyQt5.QtWidgets import QMessageBox
+             QMessageBox.information(self, "Save Settings", "Session settings saved successfully.\n(File list, Params, Preprocessing)")
+
     def save_session(self):
         # Extract SG params from chain if present
         sg_win = "5"
@@ -86,8 +94,10 @@ class MainWindow(QMainWindow):
             with open("session_config.json", "w") as f:
                 json.dump(cfg, f, indent=4)
             print("Session saved.")
+            return True
         except Exception as e:
             print(f"Failed to save session: {e}")
+            return False
 
     def load_session(self):
         if not os.path.exists("session_config.json"): return

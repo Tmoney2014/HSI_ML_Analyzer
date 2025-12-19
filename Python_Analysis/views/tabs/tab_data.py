@@ -99,6 +99,13 @@ class TabData(QWidget):
         vbox_r.addWidget(grp_mode)
         
         vbox_r.addStretch()
+        
+        # Save Session Button
+        btn_save = QPushButton("Save Settings (Session)")
+        btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; height: 30px;")
+        btn_save.clicked.connect(lambda: self.vm.request_save())
+        vbox_r.addWidget(btn_save)
+        
         grp_ref.setLayout(vbox_r)
         layout.addWidget(grp_ref)
         

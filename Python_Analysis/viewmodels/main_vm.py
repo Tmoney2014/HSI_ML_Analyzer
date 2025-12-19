@@ -9,6 +9,7 @@ class MainViewModel(QObject):
     files_changed = pyqtSignal()
     refs_changed = pyqtSignal()
     mode_changed = pyqtSignal(bool) # True=Reflectance, False=Raw
+    save_requested = pyqtSignal() # New signal for manual save
 
     def __init__(self):
         super().__init__()
@@ -81,3 +82,6 @@ class MainViewModel(QObject):
         
     def get_all_files(self):
         return self.normal_files + self.defect_files
+
+    def request_save(self):
+        self.save_requested.emit()
