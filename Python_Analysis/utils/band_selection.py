@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.decomposition import PCA
+from scipy.signal import savgol_filter
 
 def select_best_bands(data_cube, n_bands=5, method='pca'):
     """
@@ -18,6 +19,49 @@ def select_best_bands(data_cube, n_bands=5, method='pca'):
     Returns:
         selected_band_indices: 선택된 밴드의 인덱스 리스트 (오름차순 정렬됨)
     """
+    
+    # --- SNR Calculation & Filtering ---
+    # 1. 평균 스펙트럼 계산
+    mean_spectrum = np.mean(data_cube.reshape(-1, data_cube.shape[-1]), axis=0)
+    
+    # 2. Savgol Filter로 평활화 (Poly=2, Win=5) - 노이즈 제거된 이상적 신호 추정
+    try:
+        smoothed = savgol_filter(mean_spectrum, window_length=5, polyorder=2)
+        
+        # 3. 노이즈 추정 (잔차 = 원본 - 평활화)
+        noise_est = np.abs(mean_spectrum - smoothed)
+        
+        # 4. SNR 계산: 20 * log10(신호 / 노이즈)
+        # 신호가 0이거나 노이즈가 0인 경우 방어
+        signal_level = np.abs(mean_spectrum)
+        snr = 20 * np.log10( (signal_level + 1e-6) / (noise_est + 1e-6) )
+        
+        # 5. 임계값(Threshold) 미만인 밴드 찾기
+        # 예: 30dB 미만이면 노이즈가 심하다고 판단?
+        # 근데 절대적 수치는 데이터마다 다름. 상대적으로 하위 5%를 자를까?
+        # 여기서는 "값이 너무 튀는" 구간을 잡기 위해, 노이즈가 신호의 1% 이상인 경우 등을 볼 수 있음.
+        # 일단 안전하게: SNR이 매우 낮은 하위 밴드들을 제외
+        # 여기서는 간단히: "초반 5개" 같은 하드코딩 대신, SNR이 급격히 떨어지는 구간을 찾으면 좋음.
+        # 하지만 지금은 시각적 확인이 어려우므로, "노이즈 레벨이 평균보다 매우 높은" 밴드를 찾음.
+        
+        # 방식: 노이즈 추정치가 전체 평균 노이즈의 3배 이상인 밴드 제거
+        mean_noise_level = np.mean(noise_est)
+        bad_bands = np.where(noise_est > mean_noise_level * 3.0)[0]
+        
+        # 추가: 신호 크기 자체가 너무 작은 밴드(0에 가까움)도 제거
+        max_signal = np.max(signal_level)
+        weak_bands = np.where(signal_level < max_signal * 0.05)[0] # 최대값의 5% 미만
+        
+        exclude_bands = set(bad_bands) | set(weak_bands)
+        
+        if exclude_bands:
+            display_excludes = sorted([int(b) + 1 for b in exclude_bands])
+            print(f"   [Band Selection] Low SNR/Weak Signal Bands Removed: {display_excludes[:10]} ... (Total {len(display_excludes)})")
+            
+    except Exception as e:
+        print(f"   [Band Selection] SNR Calculation Failed: {e}")
+        exclude_bands = set()
+        
     print(f"   [Band Selection] '{method.upper()}' 알고리즘으로 중요 밴드 {n_bands}개를 찾습니다...")
     
     h, w, b = data_cube.shape
@@ -49,8 +93,20 @@ def select_best_bands(data_cube, n_bands=5, method='pca'):
     
     for i in range(min(n_bands, abs_components.shape[0])):
         # i번째 주성분에서 가장 기여도가 큰 밴드 인덱스를 찾음
-        band_idx = np.argmax(abs_components[i])
-        selected_band_indices.add(int(band_idx))
+        # 단, exclude_bands에 있는 밴드는 제외하고 찾음
+        # argsort로 큰 순서대로 정렬한 뒤, 제외 목록에 없는 첫 번째를 선택
+        sorted_indices = np.argsort(abs_components[i])[::-1]
+        
+        found = False
+        for band_idx in sorted_indices:
+            if band_idx not in exclude_bands:
+                selected_band_indices.add(int(band_idx))
+                found = True
+                break
+        
+        # 만약 모든 후보가 제외 목록에 있다면(그럴리 없겠지만), 그냥 1등을 뽑음
+        if not found:
+             selected_band_indices.add(int(sorted_indices[0]))
         
     # 5. 혹시 중복된 밴드가 뽑혀서 개수가 모자란 경우 처리
     # (예: PC1과 PC2가 모두 50번 밴드를 가장 중요하다고 뽑을 수 있음)
@@ -59,6 +115,8 @@ def select_best_bands(data_cube, n_bands=5, method='pca'):
         flat_loadings = np.sum(abs_components, axis=0)
         sorted_indices = np.argsort(flat_loadings)[::-1]
         for idx in sorted_indices:
+            if idx in exclude_bands: continue
+            
             selected_band_indices.add(int(idx))
             if len(selected_band_indices) >= n_bands:
                 break
