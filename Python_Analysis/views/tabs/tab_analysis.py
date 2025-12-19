@@ -91,7 +91,7 @@ class TabAnalysis(QWidget):
         vbox_p.addWidget(self.slider_thresh)
         
         vbox_p.addSpacing(10)
-        vbox_p.addWidget(QLabel("<b>Preprocessing Pipeline (Drag to Reorder):</b>"))
+        vbox_p.addWidget(QLabel("<b>Preprocessing Pipeline (Drag to Re-order):</b>"))
         self.list_prep = QListWidget()
         self.list_prep.setDragDropMode(QListWidget.InternalMove)
         self.list_prep.itemChanged.connect(self.update_params)
@@ -360,9 +360,9 @@ class TabAnalysis(QWidget):
                     sys.stdout.flush()
                     
                     if x_axis is None or len(x_axis) != len(spec):
-                        print("[Warning] X/Y mismatch! Fallback to index.", file=sys.stdout)
                         x_axis = np.arange(len(spec))
                         
+                    self.current_waves = x_axis
                     ax.plot(x_axis, spec, label=os.path.basename(path), alpha=0.7)
             
             # Dynamic Slider Update (Restore Feature)
@@ -456,7 +456,7 @@ class TabAnalysis(QWidget):
         if hasattr(self, 'current_waves') and self.current_waves is not None:
              try:
                 idx = (np.abs(self.current_waves - x)).argmin()
-                return f"Band #{idx+1} ({x:.1f}nm), Int: {y:.0f}"
+                return f"Band #{idx+1} ({x:.1f}nm), Int: {y:.2f}"
              except: pass
         return f"x={x:.1f}, y={y:.2f}"
 

@@ -168,9 +168,9 @@ class ImageViewer(QWidget):
             try:
                 arr = np.array(self.waves)
                 idx = (np.abs(arr - x)).argmin()
-                return f"Band #{idx+1} ({x:.1f}nm), Int: {y:.0f}"
+                return f"Band #{idx+1} ({x:.1f}nm), Int: {y:.2f}"
             except: pass
-        return f"x={x:.1f}, y={y:.0f}"
+        return f"x={x:.1f}, y={y:.2f}"
 
     def plot_spectrum_single(self, x, y, color, label):
         if self.processed_cube is None: return
