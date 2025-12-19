@@ -27,25 +27,55 @@ class LearningService:
         
         return model, acc
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, use_ref=False, mask_rules=None):
         """
         Export model to JSON for C#.
         """
         weights = model.coef_[0].tolist()
         bias = float(model.intercept_[0])
         
+        # Convert prep_chain to flat format for C# compatibility
+        prep_flat = {
+            "ApplySG": False,
+            "SGWin": 5,
+            "SGPoly": 2,
+            "ApplyL2": False,
+            "ApplyMinMax": False,
+            "ApplySNV": False,
+            "ApplyCenter": False,
+            "Mode": "Reflectance" if use_ref else "Raw",
+            "MaskRules": mask_rules if mask_rules else "Mean"
+        }
+        
+        if preprocessing_config:
+            for step in preprocessing_config:
+                name = step.get('name')
+                p = step.get('params', {})
+                if name == "SG":
+                    prep_flat["ApplySG"] = True
+                    prep_flat["SGWin"] = p.get('win', 5)
+                    prep_flat["SGPoly"] = p.get('poly', 2)
+                elif name == "L2":
+                    prep_flat["ApplyL2"] = True
+                elif name == "MinMax":
+                    prep_flat["ApplyMinMax"] = True
+                elif name == "SNV":
+                    prep_flat["ApplySNV"] = True
+                elif name == "Center":
+                    prep_flat["ApplyCenter"] = True
+        
         export_data = {
             "ModelType": "LinearSVM",
             "SelectedBands": [int(b) for b in selected_bands],
             "Weights": weights,
             "Bias": bias,
-            "Preprocessing": preprocessing_config if preprocessing_config else {},
-            "Note": "Score = sum(w*x) + b. If Score > 0 then Class 1 (Defect)."
+            "Preprocessing": prep_flat,
+            "Note": "판정 공식: Score = sum(w*x) + b. 만약 Score > 0 이면 '불량(Class 1)' 입니다."
         }
         
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
         with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(export_data, f, indent=4)
+            json.dump(export_data, f, indent=4, ensure_ascii=False)
             
         print(f"   [LearningService] Model exported to {output_path}")

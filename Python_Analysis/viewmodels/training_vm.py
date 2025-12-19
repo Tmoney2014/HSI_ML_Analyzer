@@ -94,16 +94,35 @@ class TrainingViewModel(QObject):
             self.log_message.emit(f"Data Loaded. Samples: {X_train.shape[0]}")
             self.progress_update.emit(60)
             
-            # 2. Train
-            model, acc = self.service.train_svm(X_train, y_train)
+            # 2. Band Selection (PCA)
+            self.log_message.emit("Selecting best bands via PCA...")
+            from utils.band_selection import select_best_bands
+            
+            # Reshape for band selection: (samples, 1, bands) -> (samples, 1, bands) is close enough
+            # select_best_bands expects (H, W, Bands) but can accept (N, 1, B) as a cube
+            dummy_cube = X_train[:min(5000, X_train.shape[0])].reshape(-1, 1, X_train.shape[1])
+            selected_bands = select_best_bands(dummy_cube, n_bands=5)
+            
+            self.log_message.emit(f"Selected Bands: {selected_bands}")
+            
+            # Subset to selected bands
+            X_train_sub = X_train[:, selected_bands]
+            self.progress_update.emit(70)
+            
+            # 3. Train
+            model, acc = self.service.train_svm(X_train_sub, y_train)
             self.log_message.emit(f"Training Complete. Accuracy: {acc*100:.2f}%")
             self.progress_update.emit(90)
             
-            # 3. Export
-            # Bands? For now assuming all bands used if no selection logic
-            selected_bands = list(range(X_train.shape[1])) 
-            
-            self.service.export_model(model, selected_bands, output_path, preprocessing_config=self.analysis_vm.prep_chain)
+            # 4. Export
+            self.service.export_model(
+                model, 
+                selected_bands, 
+                output_path, 
+                preprocessing_config=self.analysis_vm.prep_chain,
+                use_ref=self.analysis_vm.use_ref,
+                mask_rules=self.analysis_vm.mask_rules
+            )
             self.log_message.emit(f"Saved to {output_path}")
             self.progress_update.emit(100)
             self.training_finished.emit(True)

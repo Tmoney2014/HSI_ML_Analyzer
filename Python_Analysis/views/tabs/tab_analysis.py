@@ -123,7 +123,7 @@ class TabAnalysis(QWidget):
         vbox_p.addLayout(hbox_sg)
         
         btn_upd = QPushButton("Update All Graphs")
-        btn_upd.clicked.connect(self.update_viz)
+        btn_upd.clicked.connect(self.update_params)
         vbox_p.addWidget(btn_upd)
         
         btn_reload = QPushButton("Data Reload (Clear Cache)")
@@ -148,6 +148,16 @@ class TabAnalysis(QWidget):
         viz_widget = QWidget()
         viz_widget.setLayout(viz_layout)
         layout.addWidget(viz_widget, stretch=1)
+        
+        # Connect Events
+        self.canvas.mpl_connect('scroll_event', self.on_scroll)
+        self.canvas.mpl_connect('button_press_event', self.on_press)
+        self.canvas.mpl_connect('button_release_event', self.on_release)
+        self.canvas.mpl_connect('motion_notify_event', self.on_motion)
+        
+        # Pan State
+        self.pan_active = False
+        self.pan_start = None
         
     def refresh_file_list(self):
         self.list_viz.clear()
@@ -386,6 +396,61 @@ class TabAnalysis(QWidget):
         # Refresh current viz
         self.update_viz()
         QMessageBox.information(self, "Reload", "Data Cache Cleared and Views Refreshed.")
+
+    def on_scroll(self, event):
+        ax = event.inaxes
+        if not ax: return
+        
+        base_scale = 1.2
+        if event.button == 'up':
+            scale_factor = 1 / base_scale
+        elif event.button == 'down':
+            scale_factor = base_scale
+        else:
+            return
+
+        cur_xlim = ax.get_xlim()
+        cur_ylim = ax.get_ylim()
+        
+        xdata = event.xdata
+        ydata = event.ydata
+        
+        if xdata is None or ydata is None: return
+
+        new_width = (cur_xlim[1] - cur_xlim[0]) * scale_factor
+        new_height = (cur_ylim[1] - cur_ylim[0]) * scale_factor
+
+        relx = (cur_xlim[1] - xdata) / (cur_xlim[1] - cur_xlim[0])
+        rely = (cur_ylim[1] - ydata) / (cur_ylim[1] - cur_ylim[0])
+
+        ax.set_xlim([xdata - new_width * (1 - relx), xdata + new_width * relx])
+        ax.set_ylim([ydata - new_height * (1 - rely), ydata + new_height * rely])
+        
+        self.canvas.draw_idle()
+
+    def on_press(self, event):
+        if event.button == 2: # Middle Click
+            self.pan_active = True
+            self.pan_start = (event.xdata, event.ydata)
+
+    def on_release(self, event):
+        if event.button == 2:
+            self.pan_active = False
+            self.pan_start = None
+
+    def on_motion(self, event):
+        if self.pan_active and self.pan_start and event.inaxes:
+            ax = event.inaxes
+            dx = event.xdata - self.pan_start[0]
+            dy = event.ydata - self.pan_start[1]
+            
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            
+            ax.set_xlim(xlim[0] - dx, xlim[1] - dx)
+            ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
+            
+            self.canvas.draw_idle()
 
     def format_coord(self, x, y):
         if hasattr(self, 'current_waves') and self.current_waves is not None:

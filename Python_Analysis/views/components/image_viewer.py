@@ -203,7 +203,11 @@ class ImageViewer(QWidget):
 
     def on_scroll(self, event):
         ax = event.inaxes
-        if ax != getattr(self, 'ax_img', None): return
+        if ax is None: return
+        
+        # Allow zoom on both Image and Graph
+        if ax != getattr(self, 'ax_img', None) and ax != getattr(self, 'ax_spec', None):
+            return
         
         base_scale = 1.2
         scale_factor = 1/base_scale if event.button == 'up' else base_scale
@@ -229,9 +233,10 @@ class ImageViewer(QWidget):
         self.update_view()
 
     def on_press(self, event):
-        if event.inaxes != getattr(self, 'ax_img', None): return
+        ax = event.inaxes
         
-        if event.button == 1:
+        # Left Click: Point Selection (Only on Image)
+        if event.button == 1 and ax == getattr(self, 'ax_img', None):
             x, y = int(round(event.xdata)), int(round(event.ydata))
             if self.cube is not None:
                 h, w, c = self.cube.shape
@@ -250,9 +255,11 @@ class ImageViewer(QWidget):
                 self.point_counter += 1
             self.update_view()
             
+        # Middle Click: Pan (Both Image and Graph)
         elif event.button == 2:
-            self.pan_active = True
-            self.pan_start = (event.xdata, event.ydata)
+            if ax == getattr(self, 'ax_img', None) or ax == getattr(self, 'ax_spec', None):
+                self.pan_active = True
+                self.pan_start = (event.xdata, event.ydata)
 
     def on_release(self, event):
         if event.button == 2:
@@ -260,8 +267,11 @@ class ImageViewer(QWidget):
             self.pan_start = None
 
     def on_motion(self, event):
-        if self.pan_active and self.pan_start and event.inaxes == getattr(self, 'ax_img', None):
+        if self.pan_active and self.pan_start and event.inaxes:
             ax = event.inaxes
+            # Allow pan on both Image and Graph
+            if ax != getattr(self, 'ax_img', None) and ax != getattr(self, 'ax_spec', None):
+                return
             dx = event.xdata - self.pan_start[0]
             dy = event.ydata - self.pan_start[1]
             xlim = ax.get_xlim()
