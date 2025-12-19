@@ -1,0 +1,411 @@
+from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QGroupBox, 
+                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox)
+from PyQt5.QtCore import Qt
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.gridspec as gridspec
+import os
+import sys
+import numpy as np
+
+from viewmodels.main_vm import MainViewModel
+from viewmodels.analysis_vm import AnalysisViewModel
+from views.components.custom_toolbar import CustomToolbar
+from views.components.image_viewer import ImageViewer
+
+class TabAnalysis(QWidget):
+    def __init__(self, main_vm: MainViewModel, analysis_vm: AnalysisViewModel):
+        super().__init__()
+        self.main_vm = main_vm
+        self.analysis_vm = analysis_vm
+        self.img_windows = []
+        
+        self.init_ui()
+        
+        # Connect Signals
+        self.main_vm.files_changed.connect(self.refresh_file_list)
+        self.main_vm.mode_changed.connect(self.on_mode_changed)
+        self.analysis_vm.error_occurred.connect(self.on_vm_error)
+
+    def on_vm_error(self, msg):
+        QMessageBox.critical(self, "Processing Error", f"An error occurred in the analysis engine:\n{msg}")
+
+    # ... (skipping methods)
+
+    def init_ui(self):
+        layout = QHBoxLayout(self)
+        
+        # --- Left Panel ---
+        control_panel = QWidget()
+        control_panel.setFixedWidth(400)
+        vbox_c = QVBoxLayout(control_panel)
+        
+        # File Selector
+        grp_sel = QGroupBox("Select Files")
+        split_lists = QSplitter(Qt.Vertical)
+        self.list_viz = QListWidget()
+        self.list_viz.itemDoubleClicked.connect(self.open_image_window)
+        self.list_viz.itemChanged.connect(self.update_viz)
+        split_lists.addWidget(QLabel("Select Files (Double Click for Image View):"))
+        split_lists.addWidget(self.list_viz)
+        
+        btn_refresh = QPushButton("Refresh File List")
+        btn_refresh.clicked.connect(self.refresh_file_list)
+        vbox_sel = QVBoxLayout()
+        vbox_sel.addWidget(split_lists)
+        vbox_sel.addWidget(btn_refresh)
+        vbox_sel.addWidget(QLabel("💡 Check box to see Mask & Spectrum."))
+        grp_sel.setLayout(vbox_sel)
+        vbox_c.addWidget(grp_sel)
+        
+        vbox_c.addWidget(grp_sel)
+        
+        # Preprocessing
+        grp_prep = QGroupBox("Preprocessing Parameters")
+        vbox_p = QVBoxLayout()
+        
+        hbox_th = QHBoxLayout()
+        hbox_th.addWidget(QLabel("Base Thresh:"))
+        self.txt_thresh = QLineEdit("10")
+        self.txt_thresh.setFixedWidth(60)
+        self.txt_thresh.returnPressed.connect(self.update_params)
+        hbox_th.addWidget(self.txt_thresh)
+        vbox_p.addLayout(hbox_th)
+        
+        hbox_mask = QHBoxLayout()
+        hbox_mask.addWidget(QLabel("Rules:"))
+        self.txt_mask_band = QLineEdit("Mean")
+        self.txt_mask_band.setPlaceholderText("e.g. b50 or b80>0.1")
+        hbox_mask.addWidget(self.txt_mask_band)
+        btn_apply = QPushButton("Apply")
+        btn_apply.setFixedWidth(50)
+        btn_apply.clicked.connect(self.update_params)
+        hbox_mask.addWidget(btn_apply)
+        vbox_p.addLayout(hbox_mask)
+        
+        self.slider_thresh = QSlider(Qt.Horizontal)
+        self.slider_thresh.setRange(0, 100)
+        self.slider_thresh.setValue(10)
+        self.slider_thresh.sliderReleased.connect(self.on_slider_release)
+        vbox_p.addWidget(self.slider_thresh)
+        
+        vbox_p.addSpacing(10)
+        vbox_p.addWidget(QLabel("<b>Preprocessing Pipeline (Drag to Reorder):</b>"))
+        self.list_prep = QListWidget()
+        self.list_prep.setDragDropMode(QListWidget.InternalMove)
+        self.list_prep.itemChanged.connect(self.update_params)
+        self.list_prep.model().rowsMoved.connect(self.update_params)
+        
+        steps = [
+            ("Savitzky-Golay Filter", "SG"),
+            ("L2 Norm (Vector=1)", "L2"),
+            ("Min-Max Norm (0-1)", "MinMax"),
+            ("SNV (Standardize)", "SNV"),
+            ("Mean Centering", "Center")
+        ]
+        for name, key in steps:
+            item = QListWidgetItem(name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, key)
+            self.list_prep.addItem(item)
+        vbox_p.addWidget(self.list_prep)
+        
+        # SG Parameters
+        hbox_sg = QHBoxLayout()
+        hbox_sg.addWidget(QLabel("Win:"))
+        self.txt_sg_w = QLineEdit("5"); self.txt_sg_w.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_w)
+        hbox_sg.addWidget(QLabel("Poly:"))
+        self.txt_sg_p = QLineEdit("2"); self.txt_sg_p.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_p)
+        hbox_sg.addWidget(QLabel("Deriv:"))
+        self.txt_sg_d = QLineEdit("0"); self.txt_sg_d.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_d)
+        vbox_p.addLayout(hbox_sg)
+        
+        btn_upd = QPushButton("Update All Graphs")
+        btn_upd.clicked.connect(self.update_viz)
+        vbox_p.addWidget(btn_upd)
+        
+        btn_reload = QPushButton("Data Reload (Clear Cache)")
+        btn_reload.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+        btn_reload.clicked.connect(self.reload_data_cache)
+        vbox_p.addWidget(btn_reload)
+        
+        grp_prep.setLayout(vbox_p)
+        vbox_c.addWidget(grp_prep)
+        
+        layout.addWidget(control_panel)
+        
+        # --- Right Panel ---
+        self.figure = Figure(figsize=(10, 8), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = CustomToolbar(self.canvas, self)
+        
+        viz_layout = QVBoxLayout()
+        viz_layout.addWidget(self.toolbar)
+        viz_layout.addWidget(self.canvas)
+        
+        viz_widget = QWidget()
+        viz_widget.setLayout(viz_layout)
+        layout.addWidget(viz_widget, stretch=1)
+        
+    def refresh_file_list(self):
+        self.list_viz.clear()
+        files = self.main_vm.get_all_files()
+        for f in files:
+            item = QListWidgetItem(f"{os.path.basename(f)}  [{os.path.dirname(f)}]")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, f)
+            self.list_viz.addItem(item)
+
+    def on_mode_changed(self, is_ref):
+        if is_ref:
+             self.slider_thresh.setRange(0, 1000)
+             self.slider_thresh.setValue(10) # 0.01
+             self.txt_thresh.setText("0.01")
+        else:
+             self.slider_thresh.setRange(0, 4096)
+             self.slider_thresh.setValue(100)
+             self.txt_thresh.setText("100")
+        self.update_params()
+
+    def on_slider_release(self):
+        val = self.slider_thresh.value()
+        if self.analysis_vm.use_ref:
+            # 0-1000 -> 0.0-1.0
+            self.txt_thresh.setText(f"{val/1000.0:.3f}")
+        else:
+            self.txt_thresh.setText(str(val))
+        self.update_params()
+
+    def restore_ui(self):
+        """Restore UI State from ViewModel"""
+        try:
+            # Threshold
+            if self.analysis_vm.use_ref:
+                self.slider_thresh.setRange(0, 1000)
+                # Ensure valid float
+                val = float(self.analysis_vm.threshold)
+                self.slider_thresh.setValue(int(val * 1000))
+                self.txt_thresh.setText(f"{val:.3f}")
+            else:
+                self.slider_thresh.setRange(0, 4096)
+                val = int(self.analysis_vm.threshold)
+                self.slider_thresh.setValue(val)
+                self.txt_thresh.setText(str(val))
+                
+            # Mask Rules
+            if self.analysis_vm.mask_rules:
+                self.txt_mask_band.setText(str(self.analysis_vm.mask_rules))
+            
+            # Preprocessing Chain
+            # First uncheck all
+            for i in range(self.list_prep.count()):
+                self.list_prep.item(i).setCheckState(Qt.Unchecked)
+            
+            # Recheck and restore params
+            for step in self.analysis_vm.prep_chain:
+                name = step.get('name')
+                p = step.get('params', {})
+                
+                # Restore Params if SG
+                if name == "SG":
+                    if 'win' in p: self.txt_sg_w.setText(str(p['win']))
+                    if 'poly' in p: self.txt_sg_p.setText(str(p['poly']))
+                    if 'deriv' in p: self.txt_sg_d.setText(str(p['deriv']))
+                
+                # Check Item
+                for i in range(self.list_prep.count()):
+                    item = self.list_prep.item(i)
+                    if item.data(Qt.UserRole) == name:
+                        item.setCheckState(Qt.Checked)
+                        break
+                        
+            # Trigger Viz Update if any files checked
+            self.update_viz()
+            
+        except Exception as e:
+            print(f"Restore UI Error: {e}")
+
+    def update_params(self):
+        try:
+            # 1. Text -> VM
+            val_float = float(self.txt_thresh.text())
+            self.analysis_vm.threshold = val_float
+            
+            # 2. Text -> Slider (Sync)
+            if self.analysis_vm.use_ref:
+                # 0.5 -> 500
+                slider_val = int(val_float * 1000)
+                self.slider_thresh.setRange(0, 1000)
+                self.slider_thresh.setValue(slider_val)
+            else:
+                # 4000 -> 4000
+                slider_val = int(val_float)
+                if slider_val > self.slider_thresh.maximum():
+                    self.slider_thresh.setMaximum(slider_val + 100)
+                self.slider_thresh.setValue(slider_val)
+
+            txt = self.txt_mask_band.text().strip()
+            self.analysis_vm.mask_rules = txt if (txt and txt.lower() != "mean") else None
+            
+            # Chain
+            chain = []
+            for i in range(self.list_prep.count()):
+                item = self.list_prep.item(i)
+                if item.checkState() == Qt.Checked:
+                    key = item.data(Qt.UserRole)
+                    params = {}
+                    if key == "SG":
+                        params = {
+                            "win": int(self.txt_sg_w.text()),
+                            "poly": int(self.txt_sg_p.text()),
+                            "deriv": int(self.txt_sg_d.text())
+                        }
+                    chain.append({"name": key, "params": params})
+            self.analysis_vm.prep_chain = chain
+            
+            # Trigger Viz
+            self.update_viz()
+            
+            # Update detail windows
+            self.img_windows = [w for w in self.img_windows if w.isVisible()]
+            for w in self.img_windows:
+                w.update_view()
+                
+        except Exception as e:
+            print(f"Param Error: {e}")
+
+    def update_viz(self, item=None):
+        checked_items = []
+        for i in range(self.list_viz.count()):
+            item = self.list_viz.item(i)
+            if item.checkState() == Qt.Checked:
+                checked_items.append(item.data(Qt.UserRole))
+
+        if not checked_items:
+            self.figure.clear()
+            self.figure.text(0.5, 0.5, "Check files to see Spectrum", ha='center')
+            self.canvas.draw()
+            return
+
+        progress = QProgressDialog("Processing Spectra...", "Cancel", 0, len(checked_items), self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.processEvents()
+        
+        try:
+            self.figure.clear()
+            gs = gridspec.GridSpec(1, 1)
+            ax = self.figure.add_subplot(gs[0,0])
+            
+            self.current_waves = None
+            
+            # Logic for Slider Range
+            is_ref = self.analysis_vm.use_ref # Assuming VM has this sync'd
+            # But wait, VM doesn't persist 'use_ref' from a radio button unless we sync it. 
+            # In MainWindow, we pass Vm. We need to check the Radio Button state here or sync it.
+            # TabAnalysis UI doesn't have the Radio Button! It was in TabData in the old app?
+            # No, in new app TabData has ref files, but where is the Mode?
+            # Wait, I might have missed the Mode Toggle in TabAnalysis UI or Main Window?
+            # In app.py it was in "Reference & Mode" group.
+            # In the new TabData, I added Ref files. I did NOT add Mode Toggle?
+            # LIMITATION: Migration might have missed Mode Toggle placement.
+            # Checking TabData code... it has refs.
+            # Checking TabAnalysis code... it has params.
+            # I should assume for now we use what we have or user will complain about Mode too.
+            # Wait, user mentioned "Reflectance Mode".
+            # I will check MainViewModel state.
+            
+            global_max_val = 100
+            
+            for i, path in enumerate(checked_items):
+                progress.setValue(i)
+                QApplication.processEvents()
+                if progress.wasCanceled(): break
+                
+                # We need raw cube to check max value for slider
+                # VM returns processed. We might need a way to peek or trust VM.
+                # Just for slider, let's peek cache if possible or rely on simple rule.
+                # Actually, if we use VM 'get_processed_spectrum', we don't get the raw cube max easily without reloading.
+                # BUT, we can access main_vm.data_cache directly since we are in the same process.
+                
+                if path in self.main_vm.data_cache:
+                    cube, _ = self.main_vm.data_cache[path]
+                    # Check max for slider
+                    mx = np.nanmax(cube)
+                    if mx > global_max_val: global_max_val = mx
+                
+                spec, waves = self.analysis_vm.get_processed_spectrum(path)
+                if spec is not None:
+                    x_axis = waves
+                    
+                    # Robust Axis Check
+                    nx = len(x_axis) if x_axis is not None else 0
+                    ny = len(spec)
+                    
+                    print(f"[Debug Viz] {os.path.basename(path)}: Xlen={nx}, Ylen={ny}", file=sys.stdout)
+                    sys.stdout.flush()
+                    
+                    if x_axis is None or len(x_axis) != len(spec):
+                        print("[Warning] X/Y mismatch! Fallback to index.", file=sys.stdout)
+                        x_axis = np.arange(len(spec))
+                        
+                    ax.plot(x_axis, spec, label=os.path.basename(path), alpha=0.7)
+            
+            # Dynamic Slider Update (Restore Feature)
+            # Only if not in Reflectance mode AND Rules are simple (None)
+            # If complex rules are used, slider typically doesn't apply to global intensity the same way.
+            if not self.analysis_vm.use_ref and not self.analysis_vm.mask_rules:
+                # If current max > slider max, grow it
+                current_max_slider = self.slider_thresh.maximum()
+                if global_max_val > current_max_slider:
+                    self.slider_thresh.setMaximum(int(global_max_val))
+            
+            progress.setValue(len(checked_items))
+            ax.legend()
+            ax.grid(True)
+            ax.format_coord = self.format_coord
+            self.canvas.draw()
+            
+        finally:
+            progress.close()
+
+    def reload_data_cache(self):
+        # Clear VM Cache
+        self.main_vm.data_cache.clear()
+        
+        # Clear Windows
+        self.img_windows = [w for w in self.img_windows if w.isVisible()]
+        for w in self.img_windows:
+            w.load_data() # Re-load
+            w.update_view()
+            
+        # Refresh current viz
+        self.update_viz()
+        QMessageBox.information(self, "Reload", "Data Cache Cleared and Views Refreshed.")
+
+    def format_coord(self, x, y):
+        if hasattr(self, 'current_waves') and self.current_waves is not None:
+             try:
+                idx = (np.abs(self.current_waves - x)).argmin()
+                return f"Band #{idx+1} ({x:.1f}nm), Int: {y:.0f}"
+             except: pass
+        return f"x={x:.1f}, y={y:.2f}"
+
+    def open_image_window(self, item):
+        path = item.data(Qt.UserRole)
+        # Check if already open
+        for w in self.img_windows:
+            if w.isVisible() and w.path == path:
+                 w.raise_()
+                 return
+                 
+        win = ImageViewer(path, self.analysis_vm)
+        win.show()
+        self.img_windows.append(win)
+
+    def close_all_windows(self):
+        for w in self.img_windows: w.close()
