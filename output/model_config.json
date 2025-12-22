@@ -1,32 +1,63 @@
 {
     "ModelType": "LinearSVM",
     "SelectedBands": [
-        42,
-        43,
-        95,
-        96,
-        137
+        38,
+        48,
+        99,
+        141,
+        153
     ],
     "Weights": [
-        -0.6681826546440355,
-        -0.28389463846228463,
-        -4.371018997823863,
-        -1.8653289964686421,
-        12.12468487414579
+        [
+            1.7111730529513196,
+            -0.1472873231982247,
+            -0.0037365777261194576,
+            -0.3171894688431809,
+            0.07704575105662308
+        ],
+        [
+            -0.8057568603887417,
+            -1.530443708752165,
+            0.5479771150277986,
+            -0.0010472566704846867,
+            0.032806580479634966
+        ],
+        [
+            -1.3532850759571868,
+            1.5913872312581188,
+            -0.3337566571526619,
+            0.6876766153319007,
+            -0.09541289772306373
+        ]
     ],
-    "Bias": -4.928010652770216,
+    "Bias": [
+        -0.9922206105840199,
+        -0.7970502657996347,
+        0.2587682733472674
+    ],
+    "IsMultiClass": true,
     "Preprocessing": {
-        "ApplySG": false,
+        "ApplySG": true,
         "SGWin": 5,
-        "SGPoly": 2,
+        "SGPoly": 3,
         "ApplyDeriv": false,
         "DerivOrder": 1,
         "ApplyL2": false,
-        "ApplyMinMax": true,
-        "ApplySNV": false,
+        "ApplyMinMax": false,
+        "ApplySNV": true,
         "ApplyCenter": false,
         "Mode": "Raw",
-        "MaskRules": "b80 > 34000"
+        "MaskRules": "Mean"
     },
-    "Note": "판정 공식: Score = sum(w*x) + b. 만약 Score > 0 이면 '불량(Class 1)' 입니다."
+    "Labels": {
+        "0": "pp",
+        "1": "pe",
+        "2": "abs"
+    },
+    "Colors": {
+        "0": "#a371bd",
+        "1": "#77687e",
+        "2": "#480692"
+    },
+    "Note": "Multi-Class: Weights is [Class][Feature]. Score[c] = sum(W[c]*x) + B[c]. Argmax(Score) -> Class ID."
 }

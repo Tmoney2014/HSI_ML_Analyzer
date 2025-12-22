@@ -5,6 +5,7 @@ from viewmodels.analysis_vm import AnalysisViewModel
 from services.learning_service import LearningService
 from services.data_loader import load_hsi_data
 from models import processing
+import os # Added fix for NameError
 
 class TrainingViewModel(QObject):
     log_message = pyqtSignal(str)
@@ -17,7 +18,7 @@ class TrainingViewModel(QObject):
         self.analysis_vm = analysis_vm # Need access to prep strategy
         self.service = LearningService()
         
-    def run_training(self, output_path: str):
+    def run_training(self, output_path: str, n_features: int = 5):
         file_groups = self.main_vm.file_groups
         
         # Validation: Need at least 2 groups with files
@@ -38,7 +39,7 @@ class TrainingViewModel(QObject):
             return
 
         total_files = sum(len(files) for files in valid_groups.values())
-        self.log_message.emit(f"Starting Training... Classes: {len(valid_groups)}, Total Files: {total_files}")
+        self.log_message.emit(f"Starting Training... Classes: {len(valid_groups)}, Total Files: {total_files}, Top-K Features: {n_features}")
         self.progress_update.emit(0)
         
         try:
@@ -117,15 +118,57 @@ class TrainingViewModel(QObject):
             self.progress_update.emit(60)
             
             # 2. Band Selection (PCA)
-            self.log_message.emit("Selecting best bands via PCA...")
+            self.log_message.emit(f"Selecting best {n_features} bands via PCA...")
             from utils.band_selection import select_best_bands
-            
+            import matplotlib.pyplot as plt
+
             dummy_cube = X_train[:min(5000, X_train.shape[0])].reshape(-1, 1, X_train.shape[1])
-            selected_bands = select_best_bands(dummy_cube, n_bands=5)
+            selected_bands, scores, mean_spec = select_best_bands(dummy_cube, n_bands=n_features)
             
             display_bands = [b + 1 for b in selected_bands]
             self.log_message.emit(f"Selected Bands (1-based): {display_bands}")
             
+            # --- Visualization (Explainable AI) ---
+            try:
+                plt.figure(figsize=(10, 6))
+                ax1 = plt.gca()
+                ax2 = ax1.twinx()
+                
+                # Plot 1: Importance Scores (Bar)
+                x_axis = np.arange(1, len(scores) + 1)
+                
+                # Define colors: default skyblue, selected red
+                bar_colors = ['skyblue'] * len(scores)
+                for b_idx in selected_bands:
+                    if b_idx < len(bar_colors):
+                        bar_colors[b_idx] = 'red'
+                
+                bars = ax1.bar(x_axis, scores, color=bar_colors, alpha=0.7, label='Importance Score (PCA)')
+                ax1.set_xlabel('Band Index')
+                ax1.set_ylabel('Importance Score', color='blue')
+                
+                # Plot 2: Mean Spectrum (Line)
+                ax2.plot(x_axis, mean_spec, color='gray', linestyle='--', alpha=0.5, label='Mean Spectrum')
+                ax2.set_ylabel('Intensity', color='gray')
+                
+                # Highlight Selected with Labels (No vertical lines)
+                for b_idx in selected_bands:
+                    # Add text label above the bar
+                    if b_idx < len(scores):
+                        height = scores[b_idx]
+                        ax1.text(b_idx + 1, height, f"{b_idx+1}", ha='center', va='bottom', fontsize=9, color='red', fontweight='bold')
+                
+                plt.title(f"Band Importance Analysis (Top-{n_features})")
+                
+                # Save Plot
+                plot_path = os.path.join(os.path.dirname(output_path), "band_importance.png")
+                os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+                plt.savefig(plot_path)
+                plt.close()
+                self.log_message.emit(f"   Ref: Importance plot saved to '{os.path.basename(plot_path)}'")
+            except Exception as e:
+                self.log_message.emit(f"Plotting failed: {e}")
+
             X_train_sub = X_train[:, selected_bands]
             self.progress_update.emit(70)
             

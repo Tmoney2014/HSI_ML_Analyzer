@@ -84,45 +84,49 @@ def select_best_bands(data_cube, n_bands=5, method='pca'):
     pca = PCA(n_components=n_bands)
     pca.fit(flat_data_subset)
     
-    # 4. 중요 밴드 추출
-    # pca.components_ 는 (PC개수, 밴드개수) 형태입니다.
-    # 각 PC(주성분)를 만들 때, 어떤 밴드가 가장 큰 영향(가중치 절댓값)을 줬는지 찾습니다.
-    selected_band_indices = set()
-    
+    # 4. 중요 밴드 추출 (Weighted Importance Score + Peak Finding)
+    # 4-1. 점수 계산: sum( |Loading_i| * Variance_i )
     abs_components = np.abs(pca.components_)
+    explained_variance = pca.explained_variance_ratio_
+    weighted_components = abs_components * explained_variance[:, np.newaxis]
+    importance_scores = np.sum(weighted_components, axis=0) # (Bands,)
     
-    for i in range(min(n_bands, abs_components.shape[0])):
-        # i번째 주성분에서 가장 기여도가 큰 밴드 인덱스를 찾음
-        # 단, exclude_bands에 있는 밴드는 제외하고 찾음
-        # argsort로 큰 순서대로 정렬한 뒤, 제외 목록에 없는 첫 번째를 선택
-        sorted_indices = np.argsort(abs_components[i])[::-1]
+    # 4-2. 국소 최댓값(Peak) 찾기 - Iterative Greedy Strategy
+    # Scipy find_peaks 대신, "가장 높은 점수"를 무조건 먼저 뽑고
+    # 그 주변(distance)을 지워나가는 방식이 사용자의 직관("왜 제일 높은거 안뽑아?")에 가장 부합합니다.
+    
+    masked_scores = importance_scores.copy()
+    selected_band_indices = []
+    
+    # distance=3: 좌우 3칸씩 (총 7칸 윈도우) 마스킹
+    neighbor_dist = 3
+    
+    # 무한 루프 방지용 카운터
+    safety_cnt = 0
+    max_iter = len(importance_scores) 
+    
+    while len(selected_band_indices) < n_bands and safety_cnt < max_iter:
+        safety_cnt += 1
         
-        found = False
-        for band_idx in sorted_indices:
-            if band_idx not in exclude_bands:
-                selected_band_indices.add(int(band_idx))
-                found = True
-                break
+        # 1. 현재 남은 것 중 1등 찾기
+        best_idx = np.argmax(masked_scores)
+        best_score = masked_scores[best_idx]
         
-        # 만약 모든 후보가 제외 목록에 있다면(그럴리 없겠지만), 그냥 1등을 뽑음
-        if not found:
-             selected_band_indices.add(int(sorted_indices[0]))
-        
-    # 5. 혹시 중복된 밴드가 뽑혀서 개수가 모자란 경우 처리
-    # (예: PC1과 PC2가 모두 50번 밴드를 가장 중요하다고 뽑을 수 있음)
-    # 이럴 때는 전체 기여도 합계가 높은 순서대로 나머지를 채웁니다.
-    if len(selected_band_indices) < n_bands:
-        flat_loadings = np.sum(abs_components, axis=0)
-        sorted_indices = np.argsort(flat_loadings)[::-1]
-        for idx in sorted_indices:
-            if idx in exclude_bands: continue
+        # 만약 남은 점수가 0 이하라면(모두 마스킹됨) 중단
+        if best_score <= 0:
+            break
             
-            selected_band_indices.add(int(idx))
-            if len(selected_band_indices) >= n_bands:
-                break
-                
-    result_list = sorted(list(selected_band_indices))[:n_bands]
-    display_list = [x + 1 for x in result_list]
-    print(f"   [Band Selection] 최종 선택된 밴드(Display 1-based): {display_list}")
+        # 2. 선택
+        if best_idx not in exclude_bands:
+            selected_band_indices.append(int(best_idx))
+        
+        # 3. 주변 마스킹 (자신 포함 좌우 n칸을 0으로 만듦)
+        start = max(0, best_idx - neighbor_dist)
+        end = min(len(masked_scores), best_idx + neighbor_dist + 1)
+        masked_scores[start:end] = -1.0 
     
-    return result_list
+    result_list = sorted(selected_band_indices)
+    display_list = [x + 1 for x in result_list]
+    print(f"   [Band Selection] Greedy Selection: {display_list}")
+    
+    return result_list, importance_scores, mean_spectrum

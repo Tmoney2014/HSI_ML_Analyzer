@@ -23,6 +23,17 @@ class TabTraining(QWidget):
         hbox_out.addWidget(self.txt_output)
         vbox.addLayout(hbox_out)
         
+        # New: Dynamic Band Selection
+        hbox_bands = QHBoxLayout()
+        hbox_bands.addWidget(QLabel("Number of Bands (Features):"))
+        from PyQt5.QtWidgets import QSpinBox
+        self.spin_bands = QSpinBox()
+        self.spin_bands.setRange(1, 100)
+        self.spin_bands.setValue(5)
+        self.spin_bands.setToolTip("Number of top spectral bands to select for the model.")
+        hbox_bands.addWidget(self.spin_bands)
+        vbox.addLayout(hbox_bands)
+        
         grp_idx.setLayout(vbox)
         layout.addWidget(grp_idx)
         
@@ -48,6 +59,8 @@ class TabTraining(QWidget):
         self.log_text.clear()
         self.btn_train.setEnabled(False)
         output_path = self.txt_output.text()
+        n_features = self.spin_bands.value()
+        
         # Run asynchronously? logic is currently blocking in VM. 
         # For true async, VM should use QThread. For now, we rely on VM's process_events or assume blocking.
         # But wait, VM doesn't process events. The UI will freeze.
@@ -56,7 +69,7 @@ class TabTraining(QWidget):
         # To prevent total freeze, I added QApp.processEvents logic in original app.
         # I'll rely on VM implementing that or just accept freeze for now (MVVM v1).
         # Actually VM creates a loop. I can add QApp access or simple yield.
-        self.vm.run_training(output_path)
+        self.vm.run_training(output_path, n_features)
 
     def on_finished(self, success):
         self.btn_train.setEnabled(True)
