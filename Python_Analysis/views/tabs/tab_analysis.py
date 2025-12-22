@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QGroupBox, 
-                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox)
+                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox, QDialog, QFormLayout, QSpinBox, QComboBox, QDialogButtonBox)
 from PyQt5.QtCore import Qt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -14,6 +14,64 @@ from viewmodels.analysis_vm import AnalysisViewModel
 from views.components.custom_toolbar import CustomToolbar
 from views.components.image_viewer import ImageViewer
 
+class PreprocessingSettingsDialog(QDialog):
+    def __init__(self, method_name, params, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Settings: {method_name}")
+        self.method_name = method_name
+        self.params = params.copy() if params else {}
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        
+        self.inputs = {}
+        
+        if self.method_name == "SG":
+            self.add_spin(form, "Window Size", "win", 5, 3, 51, 2) # Odd numbers
+            self.add_spin(form, "Poly Order", "poly", 2, 1, 5)
+            self.add_spin(form, "Deriv Order", "deriv", 0, 0, 2)
+            
+        elif self.method_name == "SimpleDeriv":
+            self.add_spin(form, "Gap Size", "gap", 5, 1, 50)
+            
+            # Order ComboBox
+            cb_order = QComboBox()
+            cb_order.addItems(["1st Derivative", "2nd Derivative"])
+            current_order = self.params.get("order", 1)
+            cb_order.setCurrentIndex(current_order - 1)
+            form.addRow("Order:", cb_order)
+            self.inputs["order"] = cb_order
+            
+        else:
+            layout.addWidget(QLabel("No configurable parameters for this method."))
+            
+        layout.addLayout(form)
+        
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+        
+    def add_spin(self, layout, label, key, default, min_val, max_val, step=1):
+        spin = QSpinBox()
+        spin.setRange(min_val, max_val)
+        spin.setSingleStep(step)
+        spin.setValue(self.params.get(key, default))
+        layout.addRow(f"{label}:", spin)
+        self.inputs[key] = spin
+        
+    def get_params(self):
+        new_params = {}
+        for key, widget in self.inputs.items():
+            if isinstance(widget, QSpinBox):
+                new_params[key] = widget.value()
+            elif isinstance(widget, QComboBox):
+                if key == "order":
+                    new_params[key] = widget.currentIndex() + 1
+        return new_params
+
 class TabAnalysis(QWidget):
     def __init__(self, main_vm: MainViewModel, analysis_vm: AnalysisViewModel):
         super().__init__()
@@ -21,7 +79,15 @@ class TabAnalysis(QWidget):
         self.analysis_vm = analysis_vm
         self.img_windows = []
         
+        # Initialize UI widgets to None for safety
+        self.list_prep = None
+        self.slider_thresh = None
+        self.list_viz = None
+        self.txt_thresh = None
+        
+        print("[TabAnalysis] __init__ started")
         self.init_ui()
+        print("[TabAnalysis] init_ui completed")
         
         # Connect Signals
         self.main_vm.files_changed.connect(self.refresh_file_list)
@@ -34,6 +100,7 @@ class TabAnalysis(QWidget):
     # ... (skipping methods)
 
     def init_ui(self):
+        print("[TabAnalysis] init_ui started")
         layout = QHBoxLayout(self)
         
         # --- Left Panel ---
@@ -69,7 +136,7 @@ class TabAnalysis(QWidget):
         vbox_p.addWidget(QLabel("<b>Background Removal (Intensity Cutoff):</b>"))
         
         hbox_th = QHBoxLayout()
-        hbox_th.addWidget(QLabel("Min Intensity:"))
+        hbox_th.addWidget(QLabel("Min Intensity (Cutoff):"))
         self.txt_thresh = QLineEdit("10")
         self.txt_thresh.setFixedWidth(60)
         self.txt_thresh.returnPressed.connect(self.update_params)
@@ -87,22 +154,28 @@ class TabAnalysis(QWidget):
         hbox_mask.addWidget(btn_apply)
         vbox_p.addLayout(hbox_mask)
         
+        vbox_p.addWidget(QLabel("⬇ Drag slider to exclude background pixels:"))
         self.slider_thresh = QSlider(Qt.Horizontal)
         self.slider_thresh.setRange(0, 100)
         self.slider_thresh.setValue(10)
+        # Real-time visual feedback
+        self.slider_thresh.valueChanged.connect(self.on_slider_value_changed)
+        # Heavy update on release
         self.slider_thresh.sliderReleased.connect(self.on_slider_release)
         vbox_p.addWidget(self.slider_thresh)
         
         vbox_p.addSpacing(10)
-        vbox_p.addWidget(QLabel("<b>Preprocessing Pipeline (Drag to Re-order):</b>"))
+        vbox_p.addWidget(QLabel("<b>Preprocessing Pipeline (Drag to Reorder):</b>"))
+        vbox_p.addWidget(QLabel("💡 Drag to reorder steps. Double-click to configure."))
         self.list_prep = QListWidget()
         self.list_prep.setDragDropMode(QListWidget.InternalMove)
         self.list_prep.itemChanged.connect(self.update_params)
         self.list_prep.model().rowsMoved.connect(self.update_params)
+        self.list_prep.itemDoubleClicked.connect(self.open_prep_settings)
         
         steps = [
             ("Savitzky-Golay Filter", "SG"),
-            ("Simple Derivative (1st)", "SimpleDeriv"),
+            ("Simple Derivative (Gap Diff)", "SimpleDeriv"),
             ("L2 Norm (Vector=1)", "L2"),
             ("Min-Max Norm (0-1)", "MinMax"),
             ("SNV (Standardize)", "SNV"),
@@ -113,20 +186,16 @@ class TabAnalysis(QWidget):
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             item.setCheckState(Qt.Unchecked)
             item.setData(Qt.UserRole, key)
+            item.setData(Qt.UserRole + 1, {}) # Store params dict here
+            
+            # Set default params
+            if key == "SG":
+                item.setData(Qt.UserRole + 1, {"win": 5, "poly": 2, "deriv": 0})
+            elif key == "SimpleDeriv":
+                item.setData(Qt.UserRole + 1, {"gap": 5, "order": 1})
+                
             self.list_prep.addItem(item)
         vbox_p.addWidget(self.list_prep)
-        
-        # SG Parameters
-        hbox_sg = QHBoxLayout()
-        hbox_sg.addWidget(QLabel("Win:"))
-        self.txt_sg_w = QLineEdit("5"); self.txt_sg_w.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_w)
-        hbox_sg.addWidget(QLabel("Poly:"))
-        hbox_sg.addWidget(QLabel("Poly:"))
-        self.txt_sg_p = QLineEdit("2"); self.txt_sg_p.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_p)
-        self.lbl_sg_d = QLabel("Deriv:") # Keep reference to change text
-        hbox_sg.addWidget(self.lbl_sg_d)
-        self.txt_sg_d = QLineEdit("0"); self.txt_sg_d.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_d)
-        vbox_p.addLayout(hbox_sg)
         
         btn_upd = QPushButton("Update All Graphs")
         btn_upd.clicked.connect(self.update_params)
@@ -164,16 +233,6 @@ class TabAnalysis(QWidget):
         # Pan State
         self.pan_active = False
         self.pan_start = None
-        
-    def refresh_file_list(self):
-        self.list_viz.clear()
-        files = self.main_vm.get_all_files()
-        for f in files:
-            item = QListWidgetItem(f"{os.path.basename(f)}  [{os.path.dirname(f)}]")
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            item.setCheckState(Qt.Unchecked)
-            item.setData(Qt.UserRole, f)
-            self.list_viz.addItem(item)
 
     def on_mode_changed(self, is_ref):
         if is_ref:
@@ -181,7 +240,76 @@ class TabAnalysis(QWidget):
              self.slider_thresh.setValue(10) # 0.01
              self.txt_thresh.setText("0.01")
         else:
-             self.slider_thresh.setRange(0, 65535) # Default to 16-bit
+             self.slider_thresh.setRange(0, 65535) # Safe max for both 12-bit and 16-bit
+             self.slider_thresh.setValue(100)
+             self.txt_thresh.setText("100")
+        self.update_params()
+
+    def on_slider_value_changed(self, val):
+        """Update text only for visual feedback during drag"""
+        try:
+            if self.analysis_vm.use_ref:
+                # 0-1000 -> 0.0-1.0
+                self.txt_thresh.setText(f"{val/1000.0:.3f}")
+            else:
+                self.txt_thresh.setText(str(val))
+        except Exception:
+            pass # Ignore errors during rapid drag
+
+    def on_slider_release(self):
+        """Update model/viz and Autosave on release"""
+        try:
+            val = self.slider_thresh.value()
+            self.update_params()
+        except Exception:
+            pass
+
+    def open_prep_settings(self, item):
+        key = item.data(Qt.UserRole)
+        params = item.data(Qt.UserRole + 1)
+        
+        dlg = PreprocessingSettingsDialog(key, params, self)
+        if dlg.exec_() == QDialog.Accepted:
+            new_params = dlg.get_params()
+            item.setData(Qt.UserRole + 1, new_params)
+            
+            # Construct human-readable label appendage
+            base_name = item.text().split(" [")[0] # Removing existing params if any
+            if key == "SG":
+                lbl = f"{base_name} [w={new_params['win']}, p={new_params['poly']}, d={new_params['deriv']}]"
+            elif key == "SimpleDeriv":
+                lbl = f"{base_name} [Gap={new_params['gap']}, Ord={new_params['order']}]"
+            else:
+                lbl = base_name
+                
+            item.setText(lbl)
+            self.update_params()
+        
+    def refresh_file_list(self):
+        try:
+            self.list_viz.clear()
+            files = self.main_vm.get_all_files()
+            for f in files:
+                item = QListWidgetItem(f"{os.path.basename(f)}  [{os.path.dirname(f)}]")
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                item.setCheckState(Qt.Unchecked)
+                item.setData(Qt.UserRole, f)
+                self.list_viz.addItem(item)
+        except RuntimeError:
+            # Widget deleted during shutdown - ignore
+            return
+        except Exception as e:
+            print(f"Error in refresh_file_list: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_mode_changed(self, is_ref):
+        if is_ref:
+             self.slider_thresh.setRange(0, 1000)
+             self.slider_thresh.setValue(10) # 0.01
+             self.txt_thresh.setText("0.01")
+        else:
+             self.slider_thresh.setRange(0, 65535) # Safe max for both 12-bit and 16-bit
              self.slider_thresh.setValue(100)
              self.txt_thresh.setText("100")
         self.update_params()
@@ -197,6 +325,10 @@ class TabAnalysis(QWidget):
 
     def restore_ui(self):
         """Restore UI State from ViewModel"""
+        # Safety Check: If UI is not fully initialized, do not attempt to restore
+        if self.list_prep is None or self.slider_thresh is None:
+            return
+
         try:
             # Threshold
             if self.analysis_vm.use_ref:
@@ -225,17 +357,21 @@ class TabAnalysis(QWidget):
                 name = step.get('name')
                 p = step.get('params', {})
                 
-                # Restore Params if SG
-                if name == "SG":
-                    if 'win' in p: self.txt_sg_w.setText(str(p['win']))
-                    if 'poly' in p: self.txt_sg_p.setText(str(p['poly']))
-                    if 'deriv' in p: self.txt_sg_d.setText(str(p['deriv']))
-                
-                # Check Item
+                # Check Item and Set Params
                 for i in range(self.list_prep.count()):
                     item = self.list_prep.item(i)
                     if item.data(Qt.UserRole) == name:
                         item.setCheckState(Qt.Checked)
+                        item.setData(Qt.UserRole + 1, p) # Restore Params
+                        
+                        # Update Label
+                        base_name = item.text().split(" [")[0]
+                        lbl = base_name
+                        if name == "SG":
+                            lbl = f"{base_name} [w={p.get('win',5)}, p={p.get('poly',2)}, d={p.get('deriv',0)}]"
+                        elif name == "SimpleDeriv":
+                            lbl = f"{base_name} [Gap={p.get('gap',5)}, Ord={p.get('order',1)}]"
+                        item.setText(lbl)
                         break
                         
             # Trigger Viz Update if any files checked
@@ -244,11 +380,15 @@ class TabAnalysis(QWidget):
         except Exception as e:
             print(f"Restore UI Error: {e}")
 
-    def update_params(self):
+    def update_params(self, item=None):
+        if self.list_prep is None or self.slider_thresh is None:
+            return
+            
         try:
             # 1. Text -> VM
             val_float = float(self.txt_thresh.text())
-            self.analysis_vm.threshold = val_float
+            # Use setter to trigger params_changed signal
+            self.analysis_vm.set_threshold(val_float)
             
             # 2. Text -> Slider (Sync)
             if self.analysis_vm.use_ref:
@@ -264,7 +404,8 @@ class TabAnalysis(QWidget):
                 self.slider_thresh.setValue(slider_val)
 
             txt = self.txt_mask_band.text().strip()
-            self.analysis_vm.mask_rules = txt if (txt and txt.lower() != "mean") else None
+            rules = txt if (txt and txt.lower() != "mean") else None
+            self.analysis_vm.set_mask_rules(rules)
             
             # Chain
             chain = []
@@ -272,21 +413,10 @@ class TabAnalysis(QWidget):
                 item = self.list_prep.item(i)
                 if item.checkState() == Qt.Checked:
                     key = item.data(Qt.UserRole)
-                    params = {}
-                    if key == "SG":
-                        params = {
-                            "win": int(self.txt_sg_w.text()),
-                            "poly": int(self.txt_sg_p.text()),
-                            "poly": int(self.txt_sg_p.text()),
-                            "deriv": int(self.txt_sg_d.text())
-                        }
-                    elif key == "SimpleDeriv":
-                        # Reuse 'deriv' field for Gap, 'win'/'poly' ignored
-                        params = {
-                            "gap": int(self.txt_sg_d.text()) if self.txt_sg_d.text().isdigit() else 5
-                        }
+                    params = item.data(Qt.UserRole + 1)
+                    if params is None: params = {}
                     chain.append({"name": key, "params": params})
-            self.analysis_vm.prep_chain = chain
+            self.analysis_vm.set_preprocessing_chain(chain)
             
             # Trigger Viz
             self.update_viz()
@@ -300,18 +430,30 @@ class TabAnalysis(QWidget):
             print(f"Param Error: {e}")
 
     def update_viz(self, item=None):
-        checked_items = []
-        for i in range(self.list_viz.count()):
-            item = self.list_viz.item(i)
-            if item.checkState() == Qt.Checked:
-                checked_items.append(item.data(Qt.UserRole))
-
-        if not checked_items:
-            self.figure.clear()
-            self.figure.text(0.5, 0.5, "Check files to see Spectrum", ha='center')
-            self.canvas.draw()
+        if self.list_viz is None or self.figure is None:
             return
 
+        checked_items = []
+        try:
+            for i in range(self.list_viz.count()):
+                item = self.list_viz.item(i)
+                if item.checkState() == Qt.Checked:
+                    checked_items.append(item.data(Qt.UserRole))
+        except RuntimeError: return
+
+        if not checked_items:
+            # Safety check for figure
+            if self.figure:
+                self.figure.clear()
+                self.figure.text(0.5, 0.5, "Check files to see Spectrum", ha='center')
+                if self.canvas: self.canvas.draw()
+            return
+            
+        # ... remainder of update_viz Logic ... 
+        # (Since I'm replacing a chunk, I must include the rest or ensure EndLine covers it appropriately)
+        # Wait, update_viz is long. I shouldn't replace the whole thing if I don't need to.
+        # I'll just replace the start.
+        
         progress = QProgressDialog("Processing Spectra...", "Cancel", 0, len(checked_items), self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
@@ -325,22 +467,6 @@ class TabAnalysis(QWidget):
             
             self.current_waves = None
             
-            # Logic for Slider Range
-            is_ref = self.analysis_vm.use_ref # Assuming VM has this sync'd
-            # But wait, VM doesn't persist 'use_ref' from a radio button unless we sync it. 
-            # In MainWindow, we pass Vm. We need to check the Radio Button state here or sync it.
-            # TabAnalysis UI doesn't have the Radio Button! It was in TabData in the old app?
-            # No, in new app TabData has ref files, but where is the Mode?
-            # Wait, I might have missed the Mode Toggle in TabAnalysis UI or Main Window?
-            # In app.py it was in "Reference & Mode" group.
-            # In the new TabData, I added Ref files. I did NOT add Mode Toggle?
-            # LIMITATION: Migration might have missed Mode Toggle placement.
-            # Checking TabData code... it has refs.
-            # Checking TabAnalysis code... it has params.
-            # I should assume for now we use what we have or user will complain about Mode too.
-            # Wait, user mentioned "Reflectance Mode".
-            # I will check MainViewModel state.
-            
             global_max_val = 100
             
             for i, path in enumerate(checked_items):
@@ -348,43 +474,25 @@ class TabAnalysis(QWidget):
                 QApplication.processEvents()
                 if progress.wasCanceled(): break
                 
-                # We need raw cube to check max value for slider
-                # VM returns processed. We might need a way to peek or trust VM.
-                # Just for slider, let's peek cache if possible or rely on simple rule.
-                # Actually, if we use VM 'get_processed_spectrum', we don't get the raw cube max easily without reloading.
-                # BUT, we can access main_vm.data_cache directly since we are in the same process.
-                
                 if path in self.main_vm.data_cache:
                     cube, _ = self.main_vm.data_cache[path]
-                    # Check max for slider
                     mx = np.nanmax(cube)
                     if mx > global_max_val: global_max_val = mx
                 
                 spec, waves = self.analysis_vm.get_processed_spectrum(path)
                 if spec is not None:
                     x_axis = waves
-                    
-                    # Robust Axis Check
-                    nx = len(x_axis) if x_axis is not None else 0
-                    ny = len(spec)
-                    
-                    print(f"[Debug Viz] {os.path.basename(path)}: Xlen={nx}, Ylen={ny}", file=sys.stdout)
-                    sys.stdout.flush()
-                    
                     if x_axis is None or len(x_axis) != len(spec):
                         x_axis = np.arange(len(spec))
                         
                     self.current_waves = x_axis
                     ax.plot(x_axis, spec, label=os.path.basename(path), alpha=0.7)
             
-            # Dynamic Slider Update (Restore Feature)
-            # Only if not in Reflectance mode AND Rules are simple (None)
-            # If complex rules are used, slider typically doesn't apply to global intensity the same way.
             if not self.analysis_vm.use_ref and not self.analysis_vm.mask_rules:
-                # If current max > slider max, grow it
-                current_max_slider = self.slider_thresh.maximum()
-                if global_max_val > current_max_slider:
-                    self.slider_thresh.setMaximum(int(global_max_val))
+                if self.slider_thresh:
+                    current_max_slider = self.slider_thresh.maximum()
+                    if global_max_val > current_max_slider:
+                        self.slider_thresh.setMaximum(int(global_max_val))
             
             progress.setValue(len(checked_items))
             ax.legend()
