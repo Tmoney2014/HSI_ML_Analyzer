@@ -7,18 +7,25 @@ from services.data_loader import load_hsi_data
 class AnalysisViewModel(QObject):
     visualization_updated = pyqtSignal(object, object) # (spec_data, waves)
     error_occurred = pyqtSignal(str)
+    # Signal for UI updates
+    model_updated = pyqtSignal() # When processing chain or params change significantly affecting visualization
+    params_changed = pyqtSignal() # When any parameter changes (for Auto-Save)
 
     def __init__(self, main_vm: MainViewModel):
         super().__init__()
         self.main_vm = main_vm
         
-        # Params
-        self.threshold = 0.1
-        self.mask_rules = None
+        # Analysis parameters
+        self.threshold = 0.0 # Will be updated by UI
+        self.mask_rules = None # e.g. "Band 10 > 500" or just "Mean"
         # self.use_ref delegated to MainVM
         
-        # Preprocessing Config
-        self.prep_chain = [] # List of config dicts
+        # Preprocessing Chain
+        # List of dicts: {"name": "SG", "params": {...}}
+        self.prep_chain = []
+        
+        # Connect to main VM signals if needed
+        # self.main_vm.files_changed.connect(self.on_data_changed)
         
     @property
     def use_ref(self):
@@ -26,6 +33,46 @@ class AnalysisViewModel(QObject):
         
     def set_preprocessing_chain(self, chain):
         self.prep_chain = chain
+        self.params_changed.emit()
+        self.model_updated.emit()
+
+    def set_threshold(self, val: float):
+        self.threshold = val
+        self.params_changed.emit()
+        self.model_updated.emit()
+        
+    def set_mask_rules(self, rules: str):
+        self.mask_rules = rules
+        self.params_changed.emit()
+        self.model_updated.emit()
+        
+    def add_step(self, step_name, params=None):
+        step = {"name": step_name, "params": params or {}}
+        self.prep_chain.append(step)
+        self.params_changed.emit()
+        self.model_updated.emit()
+        
+    def remove_step(self, index):
+        if 0 <= index < len(self.prep_chain):
+            del self.prep_chain[index]
+            self.params_changed.emit()
+            self.model_updated.emit()
+            
+    def move_step(self, index, direction):
+        if direction == -1 and index > 0:
+            self.prep_chain[index], self.prep_chain[index-1] = self.prep_chain[index-1], self.prep_chain[index]
+            self.params_changed.emit()
+            self.model_updated.emit()
+        elif direction == 1 and index < len(self.prep_chain) - 1:
+            self.prep_chain[index], self.prep_chain[index+1] = self.prep_chain[index+1], self.prep_chain[index]
+            self.params_changed.emit()
+            self.model_updated.emit()
+
+    def update_params(self, index, new_params):
+        if 0 <= index < len(self.prep_chain):
+            self.prep_chain[index]['params'] = new_params
+            self.params_changed.emit()
+            self.model_updated.emit()
         
     def get_processed_spectrum(self, file_path):
         try:
@@ -71,7 +118,7 @@ class AnalysisViewModel(QObject):
                                                         poly_order=p.get('poly', 2),
                                                         deriv=p.get('deriv', 0))
                 elif name == "SimpleDeriv":
-                    processed = processing.apply_simple_derivative(processed, gap=p.get('gap', 5))
+                    processed = processing.apply_simple_derivative(processed, gap=p.get('gap', 5), order=p.get('order', 1))
                 elif name == "SNV":
                     processed = processing.apply_snv(processed)
                 elif name == "L2":

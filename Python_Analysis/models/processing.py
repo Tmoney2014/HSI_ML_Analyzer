@@ -98,34 +98,32 @@ def apply_minmax_norm(data):
     range_vals[range_vals == 0] = 1e-10
     return (data - min_vals) / range_vals
 
-def apply_simple_derivative(data, gap=5):
+def apply_simple_derivative(data, gap=5, order=1):
     """
     Apply Simple Derivative (Gap Difference).
     Formula: D[i] = Spectrum[i] - Spectrum[i - gap]
+    If order > 1, apply iteratively.
     
     Args:
         data: (Samples, Bands)
         gap: separation between bands (default: 5)
+        order: 1 or 2 (default: 1)
         
     Returns:
         Processed data (same shape). 
-        First 'gap' elements are padded (e.g. repeated or zeroed).
+        Padding increases with order.
     """
     if gap < 1: return data
+    if order < 1: return data
     
-    # data shape: (N, Bands)
-    # We want: data[:, gap:] - data[:, :-gap]
+    processed = data.copy()
     
-    # Example: Bands=10, Gap=2
-    # Result[2] = B[2] - B[0]
-    # Result[3] = B[3] - B[1]
-    # ...
-    # Result[0], Result[1] are undefined (Pad with 0 or edge)
-    
-    diff = data[:, gap:] - data[:, :-gap]
-    
-    # Pad the beginning to maintain shape
-    # Pad width: ((0,0), (gap, 0)) -> (samples_margin, bands_margin)
-    padded = np.pad(diff, ((0, 0), (gap, 0)), mode='edge')
-    
-    return padded
+    for _ in range(order):
+        # Result[i] = Current[i] - Current[i-gap]
+        diff = processed[:, gap:] - processed[:, :-gap]
+        
+        # Pad to restore shape
+        # Pad width: ((0,0), (gap, 0)) -> (samples_margin, bands_margin)
+        processed = np.pad(diff, ((0, 0), (gap, 0)), mode='edge')
+        
+    return processed
