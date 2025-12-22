@@ -65,8 +65,11 @@ class TabAnalysis(QWidget):
         grp_prep = QGroupBox("Preprocessing Parameters")
         vbox_p = QVBoxLayout()
         
+        # --- Threshold & Mask Band ---
+        vbox_p.addWidget(QLabel("<b>Background Removal (Intensity Cutoff):</b>"))
+        
         hbox_th = QHBoxLayout()
-        hbox_th.addWidget(QLabel("Base Thresh:"))
+        hbox_th.addWidget(QLabel("Min Intensity:"))
         self.txt_thresh = QLineEdit("10")
         self.txt_thresh.setFixedWidth(60)
         self.txt_thresh.returnPressed.connect(self.update_params)
@@ -99,6 +102,7 @@ class TabAnalysis(QWidget):
         
         steps = [
             ("Savitzky-Golay Filter", "SG"),
+            ("Simple Derivative (1st)", "SimpleDeriv"),
             ("L2 Norm (Vector=1)", "L2"),
             ("Min-Max Norm (0-1)", "MinMax"),
             ("SNV (Standardize)", "SNV"),
@@ -117,8 +121,10 @@ class TabAnalysis(QWidget):
         hbox_sg.addWidget(QLabel("Win:"))
         self.txt_sg_w = QLineEdit("5"); self.txt_sg_w.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_w)
         hbox_sg.addWidget(QLabel("Poly:"))
+        hbox_sg.addWidget(QLabel("Poly:"))
         self.txt_sg_p = QLineEdit("2"); self.txt_sg_p.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_p)
-        hbox_sg.addWidget(QLabel("Deriv:"))
+        self.lbl_sg_d = QLabel("Deriv:") # Keep reference to change text
+        hbox_sg.addWidget(self.lbl_sg_d)
         self.txt_sg_d = QLineEdit("0"); self.txt_sg_d.setFixedWidth(40); hbox_sg.addWidget(self.txt_sg_d)
         vbox_p.addLayout(hbox_sg)
         
@@ -175,7 +181,7 @@ class TabAnalysis(QWidget):
              self.slider_thresh.setValue(10) # 0.01
              self.txt_thresh.setText("0.01")
         else:
-             self.slider_thresh.setRange(0, 4096)
+             self.slider_thresh.setRange(0, 65535) # Default to 16-bit
              self.slider_thresh.setValue(100)
              self.txt_thresh.setText("100")
         self.update_params()
@@ -200,7 +206,7 @@ class TabAnalysis(QWidget):
                 self.slider_thresh.setValue(int(val * 1000))
                 self.txt_thresh.setText(f"{val:.3f}")
             else:
-                self.slider_thresh.setRange(0, 4096)
+                self.slider_thresh.setRange(0, 65535)
                 val = int(self.analysis_vm.threshold)
                 self.slider_thresh.setValue(val)
                 self.txt_thresh.setText(str(val))
@@ -271,7 +277,13 @@ class TabAnalysis(QWidget):
                         params = {
                             "win": int(self.txt_sg_w.text()),
                             "poly": int(self.txt_sg_p.text()),
+                            "poly": int(self.txt_sg_p.text()),
                             "deriv": int(self.txt_sg_d.text())
+                        }
+                    elif key == "SimpleDeriv":
+                        # Reuse 'deriv' field for Gap, 'win'/'poly' ignored
+                        params = {
+                            "gap": int(self.txt_sg_d.text()) if self.txt_sg_d.text().isdigit() else 5
                         }
                     chain.append({"name": key, "params": params})
             self.analysis_vm.prep_chain = chain

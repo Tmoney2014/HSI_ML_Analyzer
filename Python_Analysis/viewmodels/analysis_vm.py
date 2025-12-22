@@ -70,6 +70,8 @@ class AnalysisViewModel(QObject):
                                                         window_size=p.get('win', 5), 
                                                         poly_order=p.get('poly', 2),
                                                         deriv=p.get('deriv', 0))
+                elif name == "SimpleDeriv":
+                    processed = processing.apply_simple_derivative(processed, gap=p.get('gap', 5))
                 elif name == "SNV":
                     processed = processing.apply_snv(processed)
                 elif name == "L2":

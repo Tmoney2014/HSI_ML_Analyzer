@@ -39,6 +39,8 @@ class LearningService:
             "ApplySG": False,
             "SGWin": 5,
             "SGPoly": 2,
+            "ApplyDeriv": False,
+            "DerivOrder": 1,
             "ApplyL2": False,
             "ApplyMinMax": False,
             "ApplySNV": False,
@@ -55,6 +57,9 @@ class LearningService:
                     prep_flat["ApplySG"] = True
                     prep_flat["SGWin"] = p.get('win', 5)
                     prep_flat["SGPoly"] = p.get('poly', 2)
+                elif name == "SimpleDeriv":
+                    prep_flat["ApplyDeriv"] = True
+                    prep_flat["Gap"] = p.get('gap', 5) # Export Gap size
                 elif name == "L2":
                     prep_flat["ApplyL2"] = True
                 elif name == "MinMax":

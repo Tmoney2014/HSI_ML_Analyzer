@@ -61,6 +61,7 @@ class TrainingViewModel(QObject):
                         name = step.get('name')
                         p = step.get('params', {})
                         if name == "SG": data = processing.apply_savgol(data, p.get('win'), p.get('poly'), p.get('deriv', 0))
+                        elif name == "SimpleDeriv": data = processing.apply_simple_derivative(data, gap=p.get('gap', 5))
                         elif name == "SNV": data = processing.apply_snv(data)
                         elif name == "L2": data = processing.apply_l2_norm(data)
                         elif name == "MinMax": data = processing.apply_minmax_norm(data)
