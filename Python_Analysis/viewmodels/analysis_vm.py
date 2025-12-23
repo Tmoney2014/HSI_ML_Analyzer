@@ -18,6 +18,7 @@ class AnalysisViewModel(QObject):
         # Analysis parameters
         self.threshold = 0.0 # Will be updated by UI
         self.mask_rules = None # e.g. "Band 10 > 500" or just "Mean"
+        self.exclude_bands_str = "" # User input for exclusion
         # self.use_ref delegated to MainVM
         
         # Preprocessing Chain
@@ -45,6 +46,40 @@ class AnalysisViewModel(QObject):
         self.mask_rules = rules
         self.params_changed.emit()
         self.model_updated.emit()
+        
+    def set_exclude_bands(self, val: str):
+        self.exclude_bands_str = val
+        self.params_changed.emit() # Auto-save trigger if needed
+        
+    def parse_exclude_bands(self):
+        """
+        Parses "1-5, 92" string into list of 0-based indices.
+        """
+        if not self.exclude_bands_str: return []
+        
+        indices = set()
+        parts = self.exclude_bands_str.split(',')
+        for p in parts:
+            p = p.strip()
+            if not p: continue
+            
+            try:
+                if '-' in p:
+                    # Range: "1-5"
+                    start, end = p.split('-')
+                    s = int(start)
+                    e = int(end)
+                    # User 1-based -> 0-based
+                    # Range inclusive for user
+                    for i in range(s, e + 1):
+                        indices.add(i - 1)
+                else:
+                    # Single: "92"
+                    indices.add(int(p) - 1)
+            except ValueError:
+                pass # Ignore bad input
+                
+        return list(indices)
         
     def add_step(self, step_name, params=None):
         step = {"name": step_name, "params": params or {}}
@@ -118,13 +153,17 @@ class AnalysisViewModel(QObject):
                                                         poly_order=p.get('poly', 2),
                                                         deriv=p.get('deriv', 0))
                 elif name == "SimpleDeriv":
-                    processed = processing.apply_simple_derivative(processed, gap=p.get('gap', 5), order=p.get('order', 1))
+                    processed = processing.apply_simple_derivative(processed, gap=p.get('gap', 5), order=p.get('order', 1), apply_ratio=p.get('ratio', False), ndi_threshold=p.get('ndi_threshold', 1e-4))
                 elif name == "SNV":
                     processed = processing.apply_snv(processed)
                 elif name == "L2":
                     processed = processing.apply_l2_norm(processed)
+                elif name == "3PointDepth":
+                    processed = processing.apply_rolling_3point_depth(processed, gap=p.get('gap', 5))
                 elif name == "MinMax":
                     processed = processing.apply_minmax_norm(processed)
+                elif name == "MinSub":
+                    processed = processing.apply_min_subtraction(processed)
                 elif name == "Center":
                     processed = processing.apply_mean_centering(processed)
                 

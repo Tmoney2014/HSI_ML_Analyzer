@@ -86,6 +86,14 @@ def apply_mean_centering(data):
     mean_spectrum = np.mean(data, axis=0)
     return data - mean_spectrum
 
+def apply_min_subtraction(data):
+    """
+    Subtract the minimum value from each spectrum (Baseline Correction).
+    Shifts the spectrum so the lowest point is at 0.
+    """
+    min_vals = np.min(data, axis=1, keepdims=True)
+    return data - min_vals
+
 def apply_l2_norm(data):
     l2_norms = np.linalg.norm(data, axis=1, keepdims=True)
     l2_norms[l2_norms == 0] = 1e-10
@@ -98,32 +106,118 @@ def apply_minmax_norm(data):
     range_vals[range_vals == 0] = 1e-10
     return (data - min_vals) / range_vals
 
-def apply_simple_derivative(data, gap=5, order=1):
+def apply_simple_derivative(data, gap: int = 5, order: int = 1, apply_ratio: bool = False, ndi_threshold: float = 1e-4):
     """
-    Apply Simple Derivative (Gap Difference).
-    Formula: D[i] = Spectrum[i] - Spectrum[i - gap]
-    If order > 1, apply iteratively.
+    /// <ai>AI가 작성함</ai>
+    Gap Difference (Simple Differentiation).
+    주어진 Gap 만큼 떨어진 밴드 간의 차이를 계산합니다.
+    공식: Output[i] = Band[i] - Band[i + gap]
+    
+    [Option] Apply Ratio (NDI):
+    공식: Output[i] = (Band[i] - Band[i + gap]) / (Band[i] + Band[i + gap] + epsilon)
+    
+    이 과정을 거치면 데이터의 밴드 수가 (Gap * order)만큼 줄어듭니다.
     
     Args:
-        data: (Samples, Bands)
-        gap: separation between bands (default: 5)
-        order: 1 or 2 (default: 1)
+        data: (N_pixels, Bands) 입력 데이터
+        gap: 밴드 간 간격 (Default: 5)
+        order: 미분 반복 횟수 (Default: 1)
+        apply_ratio: Band Ratio (NDI) 적용 여부 (Default: False)
         
     Returns:
-        Processed data (same shape). 
-        Padding increases with order.
+        diff_data: (N_pixels, New_Bands) 차분된 데이터
     """
     if gap < 1: return data
     if order < 1: return data
     
-    processed = data.copy()
+    
+    diff_data = data.copy()
+    epsilon = 1e-6
     
     for _ in range(order):
-        # Result[i] = Current[i] - Current[i-gap]
-        diff = processed[:, gap:] - processed[:, :-gap]
+        if diff_data.shape[1] <= gap:
+            print(f"Warning: Cannot apply gap difference (Bands {diff_data.shape[1]} <= Gap {gap})")
+            break
         
-        # Pad to restore shape
-        # Pad width: ((0,0), (gap, 0)) -> (samples_margin, bands_margin)
-        processed = np.pad(diff, ((0, 0), (gap, 0)), mode='edge')
+        # User Logic: data[:, :, :-GAP] - data[:, :, GAP:]
+        # Note: 
+        # A = data[:, :-gap] (Index 0 ~ N-Gap)
+        # B = data[:, gap:]  (Index Gap ~ N)
         
-    return processed
+        A = diff_data[:, :-gap]
+        B = diff_data[:, gap:]
+        
+        if apply_ratio:
+            # NDI Formula: (A - B) / (A + B)
+            numerator = A - B
+            denominator = A + B
+            
+            # Stabilization: If signal is too weak, result is 0
+            # Avoid division by zero and singularity
+            mask_valid = denominator > ndi_threshold
+            
+            # Initialize with 0
+            diff_slice = np.zeros_like(numerator)
+            
+            # Compute only where valid
+            diff_slice[mask_valid] = numerator[mask_valid] / (denominator[mask_valid] + epsilon)
+            
+            diff_data = diff_slice
+        else:
+            diff_data = A - B
+        
+    return diff_data
+
+def apply_rolling_3point_depth(data, gap: int = 5):
+    """
+    /// <ai>AI가 작성함</ai>
+    Rolling 3-Point Band Depth (Continuum Removal Lite).
+    
+    Formula:
+        L = Band[i - gap]
+        R = Band[i + gap]
+        C = Band[i]
+        
+        Baseline = (L + R) / 2
+        Depth = 1 - (C / Baseline)
+        
+    Result:
+        1.0: Center is 0 (Perfect Absorption)
+        0.0: Center == Baseline (Flat)
+        < 0: Center > Baseline (Peak, not Valley)
+        
+    Args:
+        data: (N_pixels, Bands)
+        gap: Distance to shoulders (default: 5)
+        
+    Returns:
+        depth_data: (N_pixels, New_Bands)
+        New band count = Original - (2 * gap)
+    """
+    if gap < 1: return data
+    
+    # Needs at least (2*gap + 1) bands
+    if data.shape[1] < (2 * gap + 1):
+        print(f"Warning: Not enough bands for 3-Point Depth (Has {data.shape[1]}, Need {2*gap+1})")
+        return data
+        
+    L = data[:, :-2*gap]      # Left Shoulder
+    C = data[:, gap:-gap]     # Center
+    R = data[:, 2*gap:]       # Right Shoulder
+    
+    # Baseline (Average of Shoulders)
+    baseline = (L + R) / 2.0
+    
+    # Avoid division by zero
+    epsilon = 1e-6
+    mask_valid = baseline > 1e-5
+    
+    depth_data = np.zeros_like(C)
+    
+    # Calculate Depth: 1 - (C / Baseline)
+    # Using User's logic: Score = 1 - (2*C / (L+R))
+    # Same as: 1 - (C / ((L+R)/2))
+    
+    depth_data[mask_valid] = 1.0 - (C[mask_valid] / (baseline[mask_valid] + epsilon))
+    
+    return depth_data

@@ -4,6 +4,7 @@ from viewmodels.main_vm import MainViewModel
 from viewmodels.analysis_vm import AnalysisViewModel
 from services.learning_service import LearningService
 from services.data_loader import load_hsi_data
+from services.optimization_service import OptimizationService
 from models import processing
 import os # Added fix for NameError
 
@@ -16,9 +17,92 @@ class TrainingViewModel(QObject):
         super().__init__()
         self.main_vm = main_vm
         self.analysis_vm = analysis_vm # Need access to prep strategy
+        self.main_vm = main_vm
+        self.analysis_vm = analysis_vm # Need access to prep strategy
         self.service = LearningService()
+        self.optimizer = OptimizationService()
+        self.optimizer.log_message.connect(self.log_message.emit)
         
-    def run_training(self, output_path: str, n_features: int = 5):
+    def run_optimization(self, output_path: str):
+        """
+        Orchestrate Auto-ML Optimization.
+        """
+        if self.analysis_vm is None: return
+        
+        # 1. Capture Current State as 'Initial Params'
+        prep_chain_copy = []
+        for step in self.analysis_vm.prep_chain:
+            # Deep copy params
+            new_step = {'name': step['name'], 'params': step['params'].copy()}
+            prep_chain_copy.append(new_step)
+            
+        initial_params = {
+            'prep': prep_chain_copy,
+            'n_features': 5, # Default Start
+            # Add other context if needed
+        }
+        
+        self.log_message.emit("=== Starting Auto-Optimization (Smart Lookahead) ===")
+        self.progress_update.emit(0)
+        
+        # Define Callback: Params -> Accuracy
+        def trial_callback(params):
+            # 1. Temporarily apply params to AnalysisVM (Virtual)
+            # Actually, run_training uses self.analysis_vm.prep_chain directly.
+            # So we need to inject these params into the training process.
+            # Best way: Pass 'params' to run_training explicitly or mock AnalysisVM.
+            
+            # Since refactoring run_training is risky, let's Temporarily OVERWRITE AnalysisVM state
+            # and Restore it later. This is the simplest way given the architecture.
+            
+            original_chain = self.analysis_vm.prep_chain
+            
+            # Apply Trial Params
+            self.analysis_vm.prep_chain = params['prep']
+            n_feat = params.get('n_features', 5)
+            
+            # Run Training (Internal Mode - No File Export, Just Score)
+            # WARNING: run_training runs async? No, it seems synchronous in current code except for signals.
+            # But the current implementation emits signals and returns.
+            # We need a synchronous version or modify run_training to return score.
+            
+            # Modifying run_training to return score if requested.
+            score = self.run_training(output_path=None, n_features=n_feat, internal_sim=True)
+            
+            # Restore State
+            self.analysis_vm.prep_chain = original_chain
+            return score
+
+        # Run Optimizer (Blocking for now, or thread?)
+        # For simplicity, running on main thread (might freeze UI, but OK for now as requested)
+        # Ideally should be threaded.
+        
+        try:
+            best_params, history = self.optimizer.run_optimization(initial_params, trial_callback)
+            
+            # Apply Best Params to UI
+            self.analysis_vm.set_preprocessing_chain(best_params['prep'])
+            # Notify UI to update? (AnalysisVM should handle this if property setter used)
+            # If not, we might need to refresh UI.
+            
+            self.log_message.emit(f"=== Optimization Finished. Best Accuracy: {history[-1][1]:.2f}% ===")
+            
+            # --- FINAL PRODUCTION RUN ---
+            self.log_message.emit("\n[Final Phase] Running production training with best parameters...")
+            # Ensure best params are applied (already done by line 84)
+            best_n_features = best_params.get('n_features', 5)
+            
+            # Run final training (Export Model + Save Plots)
+            self.run_training(output_path, n_features=best_n_features, internal_sim=False)
+            
+            # Note: training_finished will be emitted by run_training, so we don't emit it here
+            # self.training_finished.emit(True) 
+            
+        except Exception as e:
+            self.log_message.emit(f"Optimization Error: {e}")
+            self.training_finished.emit(False)
+            
+    def run_training(self, output_path: str, n_features: int = 5, internal_sim: bool = False):
         file_groups = self.main_vm.file_groups
         
         # Validation: Need at least 2 groups with files
@@ -40,6 +124,15 @@ class TrainingViewModel(QObject):
 
         total_files = sum(len(files) for files in valid_groups.values())
         self.log_message.emit(f"Starting Training... Classes: {len(valid_groups)}, Total Files: {total_files}, Top-K Features: {n_features}")
+        
+        # Log Preprocessing Params
+        param_log = [f"Bands={n_features}"]
+        for step in self.analysis_vm.prep_chain:
+            name = step['name']
+            p_str = ", ".join([f"{k}={v}" for k, v in step['params'].items()])
+            param_log.append(f"{name}({p_str})")
+        self.log_message.emit(f"   [Params] {', '.join(param_log)}")
+        
         self.progress_update.emit(0)
         
         try:
@@ -74,9 +167,11 @@ class TrainingViewModel(QObject):
                             name = step.get('name')
                             p = step.get('params', {})
                             if name == "SG": data = processing.apply_savgol(data, p.get('win'), p.get('poly'), p.get('deriv', 0))
-                            elif name == "SimpleDeriv": data = processing.apply_simple_derivative(data, gap=p.get('gap', 5), order=p.get('order', 1))
+                            elif name == "SimpleDeriv": data = processing.apply_simple_derivative(data, gap=p.get('gap', 5), order=p.get('order', 1), apply_ratio=p.get('ratio', False), ndi_threshold=p.get('ndi_threshold', 1e-4))
                             elif name == "SNV": data = processing.apply_snv(data)
+                            elif name == "3PointDepth": data = processing.apply_rolling_3point_depth(data, gap=p.get('gap', 5))
                             elif name == "L2": data = processing.apply_l2_norm(data)
+                            elif name == "MinSub": data = processing.apply_min_subtraction(data)
                             elif name == "MinMax": data = processing.apply_minmax_norm(data)
                             elif name == "Center": data = processing.apply_mean_centering(data)
                         
@@ -117,13 +212,17 @@ class TrainingViewModel(QObject):
             self.log_message.emit(f"Data Loaded. Samples: {X_train.shape[0]}")
             self.progress_update.emit(60)
             
-            # 2. Band Selection (PCA)
-            self.log_message.emit(f"Selecting best {n_features} bands via PCA...")
+            # 2. Band Selection (SPA)
+            exclude_indices = self.analysis_vm.parse_exclude_bands()
+            if exclude_indices:
+                self.log_message.emit(f"Excluding {len(exclude_indices)} bands from selection...")
+                
+            self.log_message.emit(f"Selecting best {n_features} bands via SPA (Successive Projections Algorithm)...")
             from utils.band_selection import select_best_bands
             import matplotlib.pyplot as plt
 
-            dummy_cube = X_train[:min(5000, X_train.shape[0])].reshape(-1, 1, X_train.shape[1])
-            selected_bands, scores, mean_spec = select_best_bands(dummy_cube, n_bands=n_features)
+            dummy_cube = X_train[:min(3000, X_train.shape[0])].reshape(-1, 1, X_train.shape[1])
+            selected_bands, scores, mean_spec = select_best_bands(dummy_cube, n_bands=n_features, method='spa', exclude_indices=exclude_indices)
             
             display_bands = [b + 1 for b in selected_bands]
             self.log_message.emit(f"Selected Bands (1-based): {display_bands}")
@@ -143,9 +242,9 @@ class TrainingViewModel(QObject):
                     if b_idx < len(bar_colors):
                         bar_colors[b_idx] = 'red'
                 
-                bars = ax1.bar(x_axis, scores, color=bar_colors, alpha=0.7, label='Importance Score (PCA)')
+                bars = ax1.bar(x_axis, scores, color=bar_colors, alpha=0.7, label='Importance Score (Projection Norm)')
                 ax1.set_xlabel('Band Index')
-                ax1.set_ylabel('Importance Score', color='blue')
+                ax1.set_ylabel('Selectivity Score (SPA)', color='blue')
                 
                 # Plot 2: Mean Spectrum (Line)
                 ax2.plot(x_axis, mean_spec, color='gray', linestyle='--', alpha=0.5, label='Mean Spectrum')
@@ -158,26 +257,33 @@ class TrainingViewModel(QObject):
                         height = scores[b_idx]
                         ax1.text(b_idx + 1, height, f"{b_idx+1}", ha='center', va='bottom', fontsize=9, color='red', fontweight='bold')
                 
-                plt.title(f"Band Importance Analysis (Top-{n_features})")
+                plt.title(f"Band Selection Result (SPA Algorithm, Top-{n_features})")
                 
-                # Save Plot
-                plot_path = os.path.join(os.path.dirname(output_path), "band_importance.png")
-                os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-                plt.savefig(plot_path)
-                plt.close()
-                self.log_message.emit(f"   Ref: Importance plot saved to '{os.path.basename(plot_path)}'")
+                plt.title(f"Band Selection Result (SPA Algorithm, Top-{n_features})")
+                
+                # Save Plot (Skip if internal simulation)
+                if output_path:
+                    plot_path = os.path.join(os.path.dirname(output_path), "band_importance.png")
+                    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+                    plt.savefig(plot_path)
+                    plt.close()
+                    self.log_message.emit(f"   Ref: Importance plot saved to '{os.path.basename(plot_path)}'")
             except Exception as e:
-                self.log_message.emit(f"Plotting failed: {e}")
+                pass # Silent fail or log if needed, but plotting is secondary
 
             X_train_sub = X_train[:, selected_bands]
             self.progress_update.emit(70)
-            
-            # 3. Train
+            # 4. Train Model
+            self.log_message.emit("Training SVM Classifier...")
             model, acc = self.service.train_svm(X_train_sub, y_train)
-            self.log_message.emit(f"Training Complete. Accuracy: {acc*100:.2f}%")
-            self.progress_update.emit(90)
             
-            # 4. Export (Pass label_map and colors_map)
+            self.log_message.emit(f"Training Accuracy: {acc*100:.2f}%")
+            self.progress_update.emit(100)
+            
+            if internal_sim:
+                return acc * 100.0 # Return Score immediately
+            
+            # 5. Export Model & Configlabel_map and colors_map)
             self.service.export_model(
                 model, 
                 selected_bands, 

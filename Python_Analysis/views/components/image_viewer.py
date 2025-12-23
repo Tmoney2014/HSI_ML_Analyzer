@@ -184,10 +184,16 @@ class ImageViewer(QWidget):
                 p = step.get('params', {})
                 if name == "SG":
                     processed_spec = processing.apply_savgol(processed_spec, p.get('win'), p.get('poly'), p.get('deriv', 0))
+                elif name == "SimpleDeriv":
+                    processed_spec = processing.apply_simple_derivative(processed_spec, gap=p.get('gap', 5), order=p.get('order', 1), apply_ratio=p.get('ratio', False), ndi_threshold=p.get('ndi_threshold', 1e-4))
                 elif name == "SNV":
                     processed_spec = processing.apply_snv(processed_spec)
+                elif name == "3PointDepth":
+                    processed_spec = processing.apply_rolling_3point_depth(processed_spec, gap=p.get('gap', 5))
                 elif name == "L2":
                     processed_spec = processing.apply_l2_norm(processed_spec)
+                elif name == "MinSub":
+                    processed_spec = processing.apply_min_subtraction(processed_spec)
                 elif name == "MinMax":
                     processed_spec = processing.apply_minmax_norm(processed_spec)
                 elif name == "Center":
@@ -196,9 +202,15 @@ class ImageViewer(QWidget):
 
             spec_1d = processed_spec.flatten()
             x_axis = self.waves if self.waves else range(len(spec_1d))
+            
+            # Fix: Gap Difference reduces band count, causing shape mismatch
+            if len(x_axis) > len(spec_1d):
+                x_axis = x_axis[:len(spec_1d)]
+                
             self.ax_spec.plot(x_axis, spec_1d, label=label, color=color, linewidth=1.5)
             
         except Exception as e:
+            # print(f"DEBUG: Processing Module: {processing.__file__}")
             print(f"Plot Single Error: {e}")
 
     def on_scroll(self, event):

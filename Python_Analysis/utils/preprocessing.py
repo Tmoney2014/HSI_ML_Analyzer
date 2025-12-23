@@ -161,6 +161,55 @@ def apply_savgol(data, window_size=5, poly_order=2, deriv=0):
     
     return filtered_data
 
+def apply_simple_derivative(data, gap: int = 5, order: int = 1, apply_ratio: bool = False):
+    """
+    /// <ai>AI가 작성함</ai>
+    Gap Difference (Simple Differentiation).
+    주어진 Gap 만큼 떨어진 밴드 간의 차이를 계산합니다.
+    공식: Output[i] = Band[i] - Band[i + gap]
+    
+    [Option] Apply Ratio (NDI):
+    공식: Output[i] = (Band[i] - Band[i + gap]) / (Band[i] + Band[i + gap] + epsilon)
+    
+    이 과정을 거치면 데이터의 밴드 수가 (Gap * order)만큼 줄어듭니다.
+    
+    Args:
+        data: (N_pixels, Bands) 입력 데이터
+        gap: 밴드 간 간격 (Default: 5)
+        order: 미분 반복 횟수 (Default: 1)
+        apply_ratio: Band Ratio (NDI) 적용 여부 (Default: False)
+        
+    Returns:
+        diff_data: (N_pixels, New_Bands) 차분된 데이터
+    """
+    diff_data = data.copy()
+    epsilon = 1e-6
+    
+    for _ in range(order):
+        if diff_data.shape[1] <= gap:
+            print(f"Warning: Cannot apply gap difference (Bands {diff_data.shape[1]} <= Gap {gap})")
+            break
+        
+        # Original (Current): Band[i] (High Wavelength index?) 
+        # Actually user logic: data[:, :-GAP] (Front) - data[:, GAP:] (Back)
+        # Note: 
+        # A = data[:, :-gap] (Index 0 ~ N-Gap)
+        # B = data[:, gap:]  (Index Gap ~ N)
+        # Typically Derivative = f(x+h) - f(x). Here it seems A - B.
+        
+        A = diff_data[:, :-gap]
+        B = diff_data[:, gap:]
+        
+        if apply_ratio:
+            # NDI Formula: (A - B) / (A + B)
+            numerator = A - B
+            denominator = A + B + epsilon
+            diff_data = numerator / denominator
+        else:
+            diff_data = A - B
+        
+    return diff_data
+
 def apply_mean_centering(data):
     """
     평균 중심화 (Mean Centering)

@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QGroupBox, 
-                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox, QDialog, QFormLayout, QSpinBox, QComboBox, QDialogButtonBox)
+                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox, QDialog, QFormLayout, QSpinBox, QComboBox, QDialogButtonBox, QCheckBox)
 from PyQt5.QtCore import Qt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -15,11 +15,13 @@ from views.components.custom_toolbar import CustomToolbar
 from views.components.image_viewer import ImageViewer
 
 class PreprocessingSettingsDialog(QDialog):
-    def __init__(self, method_name, params, parent=None):
+    def __init__(self, method, params=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Settings: {method_name}")
-        self.method_name = method_name
-        self.params = params.copy() if params else {}
+        self.setWindowTitle(f"Settings: {method}")
+        self.key = method # Store the key
+        self.params = params or {}
+        self.inputs = {}
+        
         self.init_ui()
         
     def init_ui(self):
@@ -28,12 +30,12 @@ class PreprocessingSettingsDialog(QDialog):
         
         self.inputs = {}
         
-        if self.method_name == "SG":
+        if self.key == "SG":
             self.add_spin(form, "Window Size", "win", 5, 3, 51, 2) # Odd numbers
             self.add_spin(form, "Poly Order", "poly", 2, 1, 5)
             self.add_spin(form, "Deriv Order", "deriv", 0, 0, 2)
             
-        elif self.method_name == "SimpleDeriv":
+        elif self.key == "SimpleDeriv":
             self.add_spin(form, "Gap Size", "gap", 5, 1, 50)
             
             # Order ComboBox
@@ -43,6 +45,24 @@ class PreprocessingSettingsDialog(QDialog):
             cb_order.setCurrentIndex(current_order - 1)
             form.addRow("Order:", cb_order)
             self.inputs["order"] = cb_order
+            
+            # Application Ratio (NDI) Checkbox
+            from PyQt5.QtWidgets import QCheckBox
+            cb_ratio = QCheckBox("Use Normalized Ratio (NDI)")
+            cb_ratio.setToolTip("Formula: (A-B) / (A+B)\nGood for lighting invariant analysis.")
+            cb_ratio.setChecked(self.params.get("ratio", False))
+            form.addRow("", cb_ratio)
+            self.inputs["ratio"] = cb_ratio
+            
+            # NDI Threshold
+            txt_thresh = QLineEdit()
+            txt_thresh.setPlaceholderText("e.g. 1e-4")
+            txt_thresh.setText(str(self.params.get("ndi_threshold", 1e-4)))
+            form.addRow("NDI Threshold:", txt_thresh)
+            self.inputs["ndi_threshold"] = txt_thresh
+            
+        elif self.key == "3PointDepth":
+            self.add_spin(form, "Gap Size (Shoulder Distance)", "gap", 5, 1, 50)
             
         else:
             layout.addWidget(QLabel("No configurable parameters for this method."))
@@ -70,6 +90,14 @@ class PreprocessingSettingsDialog(QDialog):
             elif isinstance(widget, QComboBox):
                 if key == "order":
                     new_params[key] = widget.currentIndex() + 1
+            elif isinstance(widget, QCheckBox): # Handle Checkbox
+                new_params[key] = widget.isChecked()
+            elif isinstance(widget, QLineEdit):
+                if key == "ndi_threshold":
+                    try:
+                        new_params[key] = float(widget.text())
+                    except:
+                        new_params[key] = 1e-4
         return new_params
 
 class TabAnalysis(QWidget):
@@ -83,7 +111,11 @@ class TabAnalysis(QWidget):
         self.list_prep = None
         self.slider_thresh = None
         self.list_viz = None
+        self.list_viz = None
         self.txt_thresh = None
+
+        # Flag to prevent signal loops during manual update
+        self.updating_from_ui = False
         
         print("[TabAnalysis] __init__ started")
         self.init_ui()
@@ -93,9 +125,53 @@ class TabAnalysis(QWidget):
         self.main_vm.files_changed.connect(self.refresh_file_list)
         self.main_vm.mode_changed.connect(self.on_mode_changed)
         self.analysis_vm.error_occurred.connect(self.on_vm_error)
+        self.analysis_vm.model_updated.connect(self.on_model_updated)
 
     def on_vm_error(self, msg):
         QMessageBox.critical(self, "Processing Error", f"An error occurred in the analysis engine:\n{msg}")
+
+    def on_model_updated(self):
+        """
+        Sync UI with VM state (received from Optimization or other external source).
+        """
+        if self.updating_from_ui:
+            return
+
+        try:
+            self.list_prep.blockSignals(True)
+            if self.txt_thresh: self.txt_thresh.blockSignals(True)
+            
+            # 1. Update Threshold
+            if self.txt_thresh:
+                self.txt_thresh.setText(str(self.analysis_vm.threshold))
+                
+            # 2. Update List Params & Checked State
+            # Map current VM chain steps by name -> params
+            vm_chain_map = {step['name']: step['params'] for step in self.analysis_vm.prep_chain}
+            
+            for i in range(self.list_prep.count()):
+                item = self.list_prep.item(i)
+                key = item.data(Qt.UserRole)
+                
+                if key in vm_chain_map:
+                    # Optimized Step: Update params and ensure checked
+                    item.setCheckState(Qt.Checked)
+                    # Only update if different to avoid signal loops
+                    vm_p = vm_chain_map[key]
+                    current_p = item.data(Qt.UserRole + 1)
+                    
+                    if current_p != vm_p:
+                        item.setData(Qt.UserRole + 1, vm_p)
+                else:
+                    # Item not in chain
+                    item.setCheckState(Qt.Unchecked)
+                    
+            # 3. Refresh Plot
+            self.update_viz()
+            
+        finally:
+            self.list_prep.blockSignals(False)
+            if self.txt_thresh: self.txt_thresh.blockSignals(False)
 
     # ... (skipping methods)
 
@@ -143,6 +219,15 @@ class TabAnalysis(QWidget):
         hbox_th.addWidget(self.txt_thresh)
         vbox_p.addLayout(hbox_th)
         
+        # Exclude Bands
+        hbox_ex = QHBoxLayout()
+        hbox_ex.addWidget(QLabel("Exclude Bands:"))
+        self.txt_exclude = QLineEdit()
+        self.txt_exclude.setPlaceholderText("e.g. 1-5, 92")
+        self.txt_exclude.editingFinished.connect(self.update_params) # Update on lose focus/enter
+        hbox_ex.addWidget(self.txt_exclude)
+        vbox_p.addLayout(hbox_ex)
+        
         hbox_mask = QHBoxLayout()
         hbox_mask.addWidget(QLabel("Rules:"))
         self.txt_mask_band = QLineEdit("Mean")
@@ -174,12 +259,14 @@ class TabAnalysis(QWidget):
         self.list_prep.itemDoubleClicked.connect(self.open_prep_settings)
         
         steps = [
-            ("Savitzky-Golay Filter", "SG"),
+            ("Baseline Correction (Min Sub)", "MinSub"),
+            ("Savitzky-Golay (Smoothing/Deriv)", "SG"),
             ("Simple Derivative (Gap Diff)", "SimpleDeriv"),
-            ("L2 Norm (Vector=1)", "L2"),
-            ("Min-Max Norm (0-1)", "MinMax"),
-            ("SNV (Standardize)", "SNV"),
-            ("Mean Centering", "Center")
+            ("L2 Normalization", "L2"),
+            ("Min-Max Normalization", "MinMax"),
+            ("Standard Normal Variate (SNV)", "SNV"),
+            ("Mean Centering", "Center"),
+            ("Rolling 3-Point Depth", "3PointDepth")
         ]
         for name, key in steps:
             item = QListWidgetItem(name)
@@ -192,7 +279,11 @@ class TabAnalysis(QWidget):
             if key == "SG":
                 item.setData(Qt.UserRole + 1, {"win": 5, "poly": 2, "deriv": 0})
             elif key == "SimpleDeriv":
-                item.setData(Qt.UserRole + 1, {"gap": 5, "order": 1})
+                item.setData(Qt.UserRole + 1, {"gap": 5, "order": 1, "ratio": False, "ndi_threshold": 1e-4})
+            elif key == "3PointDepth":
+                item.setData(Qt.UserRole + 1, {"gap": 5})
+            elif key == "MinSub":
+                item.setData(Qt.UserRole + 1, {})
                 
             self.list_prep.addItem(item)
         vbox_p.addWidget(self.list_prep)
@@ -268,6 +359,11 @@ class TabAnalysis(QWidget):
         key = item.data(Qt.UserRole)
         params = item.data(Qt.UserRole + 1)
         
+        
+        # Non-configurable methods: Ignore Double Click
+        if key in ["MinSub", "L2", "MinMax", "SNV", "Center"]:
+            return
+            
         dlg = PreprocessingSettingsDialog(key, params, self)
         if dlg.exec_() == QDialog.Accepted:
             new_params = dlg.get_params()
@@ -279,11 +375,16 @@ class TabAnalysis(QWidget):
                 lbl = f"{base_name} [w={new_params['win']}, p={new_params['poly']}, d={new_params['deriv']}]"
             elif key == "SimpleDeriv":
                 lbl = f"{base_name} [Gap={new_params['gap']}, Ord={new_params['order']}]"
+                if new_params.get("ratio", False):
+                    lbl += f" (NDI, Th={new_params.get('ndi_threshold', 1e-4)})"
+            elif key == "3PointDepth":
+                 lbl = f"{base_name} [Gap={new_params['gap']}]"
             else:
                 lbl = base_name
                 
             item.setText(lbl)
-            self.update_params()
+            item.setText(lbl)
+            # self.update_params() # Handled by itemChanged signal (setText triggers it)
         
     def refresh_file_list(self):
         try:
@@ -346,6 +447,10 @@ class TabAnalysis(QWidget):
             # Mask Rules
             if self.analysis_vm.mask_rules:
                 self.txt_mask_band.setText(str(self.analysis_vm.mask_rules))
+                
+            # Exclude Bands
+            if self.analysis_vm.exclude_bands_str:
+                self.txt_exclude.setText(self.analysis_vm.exclude_bands_str)
             
             # Preprocessing Chain
             # First uncheck all
@@ -371,6 +476,9 @@ class TabAnalysis(QWidget):
                             lbl = f"{base_name} [w={p.get('win',5)}, p={p.get('poly',2)}, d={p.get('deriv',0)}]"
                         elif name == "SimpleDeriv":
                             lbl = f"{base_name} [Gap={p.get('gap',5)}, Ord={p.get('order',1)}]"
+                            if p.get("ratio", False): lbl += f" (NDI, Th={p.get('ndi_threshold', 1e-4)})"
+                        elif name == "3PointDepth":
+                            lbl = f"{base_name} [Gap={p.get('gap', 5)}]"
                         item.setText(lbl)
                         break
                         
@@ -385,6 +493,8 @@ class TabAnalysis(QWidget):
             return
             
         try:
+            self.updating_from_ui = True
+            
             # 1. Text -> VM
             val_float = float(self.txt_thresh.text())
             # Use setter to trigger params_changed signal
@@ -407,6 +517,10 @@ class TabAnalysis(QWidget):
             rules = txt if (txt and txt.lower() != "mean") else None
             self.analysis_vm.set_mask_rules(rules)
             
+            # Exclude Bands
+            ex_str = self.txt_exclude.text()
+            self.analysis_vm.set_exclude_bands(ex_str)
+            
             # Chain
             chain = []
             for i in range(self.list_prep.count()):
@@ -416,9 +530,10 @@ class TabAnalysis(QWidget):
                     params = item.data(Qt.UserRole + 1)
                     if params is None: params = {}
                     chain.append({"name": key, "params": params})
+            
             self.analysis_vm.set_preprocessing_chain(chain)
             
-            # Trigger Viz
+            # Trigger Viz (Manual update requires calling viz, since signal is suppressed)
             self.update_viz()
             
             # Update detail windows
@@ -428,6 +543,8 @@ class TabAnalysis(QWidget):
                 
         except Exception as e:
             print(f"Param Error: {e}")
+        finally:
+            self.updating_from_ui = False
 
     def update_viz(self, item=None):
         if self.list_viz is None or self.figure is None:

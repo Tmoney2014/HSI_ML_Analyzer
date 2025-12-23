@@ -37,10 +37,20 @@ class TabTraining(QWidget):
         grp_idx.setLayout(vbox)
         layout.addWidget(grp_idx)
         
-        self.btn_train = QPushButton("START BATCH TRAINING")
-        self.btn_train.setStyleSheet("background-color: #2196F3; color: white; font-size: 16px; font-weight: bold; height: 50px;")
+        # Buttons Layout
+        hbox_btns = QHBoxLayout()
+        
+        self.btn_train = QPushButton("Train (Normal)")
+        self.btn_train.setStyleSheet("background-color: #2196F3; color: white; font-size: 14px; font-weight: bold; height: 40px;")
         self.btn_train.clicked.connect(self.on_start_click)
-        layout.addWidget(self.btn_train)
+        hbox_btns.addWidget(self.btn_train)
+        
+        self.btn_optimize = QPushButton("Auto-Optimize (Smart Search)")
+        self.btn_optimize.setStyleSheet("background-color: #9C27B0; color: white; font-size: 14px; font-weight: bold; height: 40px;")
+        self.btn_optimize.clicked.connect(self.on_optimize_click)
+        hbox_btns.addWidget(self.btn_optimize)
+        
+        layout.addLayout(hbox_btns)
         
         self.progress = QProgressBar()
         layout.addWidget(self.progress)
@@ -55,9 +65,19 @@ class TabTraining(QWidget):
         self.vm.progress_update.connect(self.progress.setValue)
         self.vm.training_finished.connect(self.on_finished)
 
+    def on_optimize_click(self):
+        self.log_text.clear()
+        self.set_buttons_enabled(False)
+        output_path = self.txt_output.text()
+        self.vm.run_optimization(output_path)
+        
+    def set_buttons_enabled(self, enabled):
+        self.btn_train.setEnabled(enabled)
+        self.btn_optimize.setEnabled(enabled)
+
     def on_start_click(self):
         self.log_text.clear()
-        self.btn_train.setEnabled(False)
+        self.set_buttons_enabled(False)
         output_path = self.txt_output.text()
         n_features = self.spin_bands.value()
         
@@ -72,7 +92,7 @@ class TabTraining(QWidget):
         self.vm.run_training(output_path, n_features)
 
     def on_finished(self, success):
-        self.btn_train.setEnabled(True)
+        self.set_buttons_enabled(True)
         if success:
             self.append_log("Done.")
         else:
