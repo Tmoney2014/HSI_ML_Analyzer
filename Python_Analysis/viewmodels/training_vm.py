@@ -245,13 +245,49 @@ class TrainingViewModel(QObject):
                     if b_idx < len(bar_colors):
                         bar_colors[b_idx] = 'red'
                 
-                bars = ax1.bar(x_axis, scores, color=bar_colors, alpha=0.7, label='Importance Score (Projection Norm)')
+                # Plot Bars
+                bars = ax1.bar(x_axis, scores, color=bar_colors, alpha=0.8, zorder=3)
                 ax1.set_xlabel('Band Index')
                 ax1.set_ylabel('Selectivity Score (SPA)', color='blue')
+
+                # 1. Shade Excluded Regions (Visualizing the Void)
+                if exclude_indices:
+                    # Logic to group consecutive indices for efficient shading
+                    sorted_ex = sorted(list(exclude_indices))
+                    if sorted_ex:
+                        ranges = []
+                        start = sorted_ex[0]
+                        end = sorted_ex[0]
+                        for i in range(1, len(sorted_ex)):
+                            if sorted_ex[i] == end + 1:
+                                end = sorted_ex[i]
+                            else:
+                                ranges.append((start, end))
+                                start = sorted_ex[i]
+                                end = sorted_ex[i]
+                        ranges.append((start, end))
+                        
+                        for (s, e) in ranges:
+                            # 0-based index s -> plot x-coordinate s+1
+                            # Shading from s+0.5 to e+1.5 to cover the integer slots
+                            ax1.axvspan(s + 0.5, e + 1.5, color='#CCCCCC', alpha=0.5, zorder=1)
+
                 
+                # Custom Legend for Bars & Shading
+                from matplotlib.patches import Patch
+                legend_elements = [
+                    Patch(facecolor='red', label='Selected')
+                ]
+                if exclude_indices:
+                    legend_elements.append(Patch(facecolor='#CCCCCC', label='Excluded Region', alpha=0.5))
+                    
+                ax1.legend(handles=legend_elements, loc='upper left')
+
                 # Plot 2: Mean Spectrum (Line)
-                ax2.plot(x_axis, mean_spec, color='gray', linestyle='--', alpha=0.5, label='Mean Spectrum')
+                ax2.plot(x_axis, mean_spec, color='black', linestyle='--', alpha=0.5, label='Mean Spectrum')
                 ax2.set_ylabel('Intensity', color='gray')
+                # ax2 legend
+                ax2.legend(loc='upper right')
                 
                 # Highlight Selected with Labels (No vertical lines)
                 for b_idx in selected_bands:
