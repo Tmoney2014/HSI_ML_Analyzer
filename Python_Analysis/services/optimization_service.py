@@ -63,10 +63,12 @@ class OptimizationService(QObject):
 
             best_gap, gap_acc, best_p_gap = self.lookahead_hill_climbing(
                 start_val=start_gap, 
-                step=3, 
+                step=2, 
                 lookahead=3, 
                 max_val=50, 
-                evaluator=gap_evaluator
+                evaluator=gap_evaluator,
+                initial_acc=current_acc,
+                initial_params_obj=best_params
             )
             
             if gap_acc > current_acc:
@@ -105,7 +107,9 @@ class OptimizationService(QObject):
                 step=100,
                 lookahead=3,
                 max_val=2000,
-                evaluator=ndi_evaluator
+                evaluator=ndi_evaluator,
+                initial_acc=current_acc,
+                initial_params_obj=best_params
             )
             
             if th_acc > current_acc:
@@ -131,9 +135,11 @@ class OptimizationService(QObject):
         best_bands, band_acc, best_p_band = self.lookahead_hill_climbing(
             start_val=start_features,
             step=5,
-            lookahead=2, # Less lookahead for bands (expensive)
+            lookahead=3,
             max_val=40,
-            evaluator=band_evaluator
+            evaluator=band_evaluator,
+            initial_acc=current_acc,
+            initial_params_obj=best_params
         )
         
         if band_acc > current_acc:
@@ -188,27 +194,28 @@ class OptimizationService(QObject):
              report.append(f"3. Band Count: {init_bands} (No Change)")
              
         report.append("-" * 40)
-        report.append(f"[Final Best Accuracy]: {current_acc:.2f}%")
         report.append("-" * 40)
-        report.append(f"[Top 3 Configurations]")
+        report.append(f"🏆 Final Best Accuracy: {current_acc:.2f}%")
+        report.append("-" * 40)
+        report.append(f"📜 Top 3 Configurations")
         
         # Sort history by accuracy descending
         sorted_history = sorted(history, key=lambda x: x[1], reverse=True)[:3]
         for i, (p, acc) in enumerate(sorted_history):
             # Extract key info for concise log
             info = []
-            info.append(f"Acc:{acc:.1f}%")
-            info.append(f"Bands:{p['n_features']}")
+            info.append(f"Bands={p['n_features']}")
             for s in p['prep']:
-                if s['name'] in target_keys: info.append(f"Gap:{s['params'].get('gap')}")
-                if s['name'] == "SimpleDeriv" and s['params'].get('ratio'): info.append(f"Th:{s['params'].get('ndi_threshold')}")
+                if s['name'] in target_keys: info.append(f"Gap={s['params'].get('gap')}")
+                if s['name'] == "SimpleDeriv" and s['params'].get('ratio'): info.append(f"Th={s['params'].get('ndi_threshold')}")
             
-            report.append(f"#{i+1}: {', '.join(info)}")
+            medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
+            report.append(f"{medal} #{i+1}: {acc:.2f}% | {', '.join(info)}")
 
         self.log_message.emit("\n".join(report))
         return best_params, history
 
-    def lookahead_hill_climbing(self, start_val, step, lookahead, max_val, evaluator):
+    def lookahead_hill_climbing(self, start_val, step, lookahead, max_val, evaluator, initial_acc=None, initial_params_obj=None):
         """
         Generic Lookahead Walker.
         Args:
@@ -217,12 +224,20 @@ class OptimizationService(QObject):
             lookahead: How many steps to check ahead
             max_val: Limit
             evaluator: Func(val) -> (accuracy, full_params)
+            initial_acc: Optional, accuracy at start_val if already known
+            initial_params_obj: Optional, params object at start_val if already known
         
         Returns:
             (best_val, best_acc, best_params_obj)
         """
         current_val = start_val
-        current_acc, current_full_params = evaluator(current_val)
+        
+        # Avoid Redundant Calculation if passed
+        if initial_acc is not None and initial_params_obj is not None:
+             current_acc = initial_acc
+             current_full_params = initial_params_obj
+        else:
+             current_acc, current_full_params = evaluator(current_val)
         
         while True:
             # Lookahead check
@@ -239,11 +254,12 @@ class OptimizationService(QObject):
                 
             if not candidates: break # Hit max
             
-            self.log_message.emit(f"   Looking ahead: {candidates} (Current Best: {current_val} @ {current_acc:.2f}%)")
+            self.log_message.emit(f"   👀 Lookahead: {candidates} (Baseline: {current_val} @ {current_acc:.2f}%)")
             
             for val in candidates:
                 acc, p_obj = evaluator(val)
-                self.log_message.emit(f"    > Testing {val}: {acc:.2f}%")
+                # Conciseness: Use Bullet
+                self.log_message.emit(f"    • Val={val}: {acc:.2f}%")
                 if acc > local_best_acc:
                     local_best_acc = acc
                     local_best_val = val
@@ -252,7 +268,7 @@ class OptimizationService(QObject):
             
             if found_better:
                 # Move to the new best position
-                self.log_message.emit(f"   >>> Jump to {local_best_val} ({local_best_acc:.2f}%)")
+                self.log_message.emit(f"   🚀 Jump to {local_best_val} ({local_best_acc:.2f}%)")
                 current_val = local_best_val
                 current_acc = local_best_acc
                 current_full_params = local_best_params

@@ -1,5 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QProgressBar, 
-                             QTextEdit, QLabel, QGroupBox, QHBoxLayout, QLineEdit)
+                             QTextEdit, QLabel, QGroupBox, QHBoxLayout, QLineEdit,
+                             QComboBox, QDoubleSpinBox, QSpinBox)
 from PyQt5.QtCore import Qt
 from viewmodels.training_vm import TrainingViewModel
 
@@ -15,7 +16,27 @@ class TabTraining(QWidget):
         
         grp_idx = QGroupBox("Training Configuration")
         vbox = QVBoxLayout()
-        vbox.addWidget(QLabel("This will train a Linear SVM using ALL loaded files."))
+        vbox.addWidget(QLabel("Configure your Machine Learning Model:"))
+        
+        # 1. Model Selection
+        hbox_model = QHBoxLayout()
+        hbox_model.addWidget(QLabel("Algorithm:"))
+        self.combo_model = QComboBox()
+        self.combo_model.addItems(["Linear SVM", "PLS-DA"])
+        self.combo_model.setToolTip("Select the ML algorithm.")
+        hbox_model.addWidget(self.combo_model)
+        vbox.addLayout(hbox_model)
+        
+        # 2. Validation Split Ratio
+        hbox_split = QHBoxLayout()
+        hbox_split.addWidget(QLabel("Validation Ratio:"))
+        self.spin_ratio = QDoubleSpinBox()
+        self.spin_ratio.setRange(0.05, 0.50) # 5% to 50%
+        self.spin_ratio.setSingleStep(0.05)
+        self.spin_ratio.setValue(0.20) # Default 20%
+        self.spin_ratio.setToolTip("Proportion of data used for validation (Test Set).")
+        hbox_split.addWidget(self.spin_ratio)
+        vbox.addLayout(hbox_split)
         
         hbox_out = QHBoxLayout()
         hbox_out.addWidget(QLabel("Output Path:"))
@@ -26,7 +47,6 @@ class TabTraining(QWidget):
         # New: Dynamic Band Selection
         hbox_bands = QHBoxLayout()
         hbox_bands.addWidget(QLabel("Number of Bands (Features):"))
-        from PyQt5.QtWidgets import QSpinBox
         self.spin_bands = QSpinBox()
         self.spin_bands.setRange(1, 100)
         self.spin_bands.setValue(5)
@@ -69,11 +89,18 @@ class TabTraining(QWidget):
         self.log_text.clear()
         self.set_buttons_enabled(False)
         output_path = self.txt_output.text()
-        self.vm.run_optimization(output_path)
+        
+        # Extract Params
+        model_type = self.combo_model.currentText()
+        ratio = self.spin_ratio.value()
+        
+        self.vm.run_optimization(output_path, model_type=model_type, test_ratio=ratio)
         
     def set_buttons_enabled(self, enabled):
         self.btn_train.setEnabled(enabled)
         self.btn_optimize.setEnabled(enabled)
+        self.combo_model.setEnabled(enabled)
+        self.spin_ratio.setEnabled(enabled)
 
     def on_start_click(self):
         self.log_text.clear()
@@ -81,15 +108,12 @@ class TabTraining(QWidget):
         output_path = self.txt_output.text()
         n_features = self.spin_bands.value()
         
+        # Extract Params
+        model_type = self.combo_model.currentText()
+        ratio = self.spin_ratio.value()
+        
         # Run asynchronously? logic is currently blocking in VM. 
-        # For true async, VM should use QThread. For now, we rely on VM's process_events or assume blocking.
-        # But wait, VM doesn't process events. The UI will freeze.
-        # I should probably update VM to yield or use QThread.
-        # However, for this refactor I will keep it simple and just call it.
-        # To prevent total freeze, I added QApp.processEvents logic in original app.
-        # I'll rely on VM implementing that or just accept freeze for now (MVVM v1).
-        # Actually VM creates a loop. I can add QApp access or simple yield.
-        self.vm.run_training(output_path, n_features)
+        self.vm.run_training(output_path, n_features, model_type=model_type, test_ratio=ratio)
 
     def on_finished(self, success):
         self.set_buttons_enabled(True)

@@ -23,7 +23,7 @@ class TrainingViewModel(QObject):
         self.optimizer = OptimizationService()
         self.optimizer.log_message.connect(self.log_message.emit)
         
-    def run_optimization(self, output_path: str):
+    def run_optimization(self, output_path: str, model_type: str = "Linear SVM", test_ratio: float = 0.2):
         """
         Orchestrate Auto-ML Optimization.
         """
@@ -42,7 +42,7 @@ class TrainingViewModel(QObject):
             # Add other context if needed
         }
         
-        self.log_message.emit("=== Starting Auto-Optimization (Smart Lookahead) ===")
+        self.log_message.emit(f"=== Starting Auto-Optimization ({model_type}) ===")
         self.progress_update.emit(0)
         
         # Define Callback: Params -> Accuracy
@@ -67,7 +67,7 @@ class TrainingViewModel(QObject):
             # We need a synchronous version or modify run_training to return score.
             
             # Modifying run_training to return score if requested.
-            score = self.run_training(output_path=None, n_features=n_feat, internal_sim=True)
+            score = self.run_training(output_path=None, n_features=n_feat, internal_sim=True, silent=True, model_type=model_type, test_ratio=test_ratio)
             
             # Restore State
             self.analysis_vm.prep_chain = original_chain
@@ -93,7 +93,7 @@ class TrainingViewModel(QObject):
             best_n_features = best_params.get('n_features', 5)
             
             # Run final training (Export Model + Save Plots)
-            self.run_training(output_path, n_features=best_n_features, internal_sim=False)
+            self.run_training(output_path, n_features=best_n_features, internal_sim=False, model_type=model_type, test_ratio=test_ratio)
             
             # Note: training_finished will be emitted by run_training, so we don't emit it here
             # self.training_finished.emit(True) 
@@ -102,7 +102,7 @@ class TrainingViewModel(QObject):
             self.log_message.emit(f"Optimization Error: {e}")
             self.training_finished.emit(False)
             
-    def run_training(self, output_path: str, n_features: int = 5, internal_sim: bool = False):
+    def run_training(self, output_path: str, n_features: int = 5, internal_sim: bool = False, silent: bool = False, model_type: str = "Linear SVM", test_ratio: float = 0.2):
         file_groups = self.main_vm.file_groups
         
         # Validation: Need at least 2 groups with files
@@ -113,7 +113,7 @@ class TrainingViewModel(QObject):
         for name, files in file_groups.items():
             if len(files) > 0:
                 if name.lower() in EXCLUDED_NAMES:
-                    self.log_message.emit(f"Skipping excluded class: '{name}'")
+                    if not silent: self.log_message.emit(f"Skipping excluded class: '{name}'")
                     continue
                 valid_groups[name] = files
         
@@ -123,7 +123,9 @@ class TrainingViewModel(QObject):
             return
 
         total_files = sum(len(files) for files in valid_groups.values())
-        self.log_message.emit(f"Starting Training... Classes: {len(valid_groups)}, Total Files: {total_files}, Top-K Features: {n_features}")
+        if not silent: 
+            self.log_message.emit(f"Starting Training... Classes: {len(valid_groups)}, Total Files: {total_files}, Top-K Features: {n_features}")
+            self.log_message.emit(f"   Model: {model_type}, Test Ratio: {test_ratio}")
         
         # Log Preprocessing Params
         param_log = [f"Bands={n_features}"]
@@ -131,7 +133,8 @@ class TrainingViewModel(QObject):
             name = step['name']
             p_str = ", ".join([f"{k}={v}" for k, v in step['params'].items()])
             param_log.append(f"{name}({p_str})")
-        self.log_message.emit(f"   [Params] {', '.join(param_log)}")
+        if not silent:
+            self.log_message.emit(f"   [Params] {', '.join(param_log)}")
         
         self.progress_update.emit(0)
         
@@ -189,7 +192,7 @@ class TrainingViewModel(QObject):
                         print(f"Error processing {f}: {e}")
                         
                     cnt += 1
-                    self.progress_update.emit(int((cnt/total_files)*50))
+                    if not silent: self.progress_update.emit(int((cnt/total_files)*50))
                     
             # Auto-assign Labels
             colors_map = {}
@@ -198,7 +201,7 @@ class TrainingViewModel(QObject):
                 # Get color, default to white?
                 colors_map[str(idx)] = self.main_vm.group_colors.get(name, "#FFFFFF")
                 
-                self.log_message.emit(f"Processing Class '{name}' (ID={idx})...")
+                if not silent: self.log_message.emit(f"Processing Class '{name}' (ID={idx})...")
                 process_files(files, idx)
             
             if not X_all:
@@ -209,15 +212,15 @@ class TrainingViewModel(QObject):
             X_train = np.vstack(X_all)
             y_train = np.hstack(y_all)
             
-            self.log_message.emit(f"Data Loaded. Samples: {X_train.shape[0]}")
+            if not silent: self.log_message.emit(f"Data Loaded. Samples: {X_train.shape[0]}")
             self.progress_update.emit(60)
             
             # 2. Band Selection (SPA)
             exclude_indices = self.analysis_vm.parse_exclude_bands()
             if exclude_indices:
-                self.log_message.emit(f"Excluding {len(exclude_indices)} bands from selection...")
+                if not silent: self.log_message.emit(f"Excluding {len(exclude_indices)} bands from selection...")
                 
-            self.log_message.emit(f"Selecting best {n_features} bands via SPA (Successive Projections Algorithm)...")
+            if not silent: self.log_message.emit(f"Selecting best {n_features} bands via SPA (Successive Projections Algorithm)...")
             from utils.band_selection import select_best_bands
             import matplotlib.pyplot as plt
 
@@ -225,7 +228,7 @@ class TrainingViewModel(QObject):
             selected_bands, scores, mean_spec = select_best_bands(dummy_cube, n_bands=n_features, method='spa', exclude_indices=exclude_indices)
             
             display_bands = [b + 1 for b in selected_bands]
-            self.log_message.emit(f"Selected Bands (1-based): {display_bands}")
+            if not silent: self.log_message.emit(f"Selected Bands (1-based): {display_bands}")
             
             # --- Visualization (Explainable AI) ---
             try:
@@ -270,14 +273,14 @@ class TrainingViewModel(QObject):
                     self.log_message.emit(f"   Ref: Importance plot saved to '{os.path.basename(plot_path)}'")
             except Exception as e:
                 pass # Silent fail or log if needed, but plotting is secondary
-
+            
             X_train_sub = X_train[:, selected_bands]
             self.progress_update.emit(70)
             # 4. Train Model
-            self.log_message.emit("Training SVM Classifier...")
-            model, acc = self.service.train_svm(X_train_sub, y_train)
+            if not silent: self.log_message.emit(f"Training {model_type}...")
+            model, acc = self.service.train_model(X_train_sub, y_train, model_type=model_type, test_ratio=test_ratio)
             
-            self.log_message.emit(f"Training Accuracy: {acc*100:.2f}%")
+            if not silent: self.log_message.emit(f"Training Accuracy: {acc*100:.2f}%")
             self.progress_update.emit(100)
             
             if internal_sim:
