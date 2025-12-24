@@ -36,7 +36,7 @@ class PreprocessingSettingsDialog(QDialog):
             self.add_spin(form, "Deriv Order", "deriv", 0, 0, 2)
             
         elif self.key == "SimpleDeriv":
-            self.add_spin(form, "Gap Size", "gap", 5, 1, 50)
+            self.add_spin(form, "Gap Size", "gap", 1, 1, 50)
             
             # Order ComboBox
             cb_order = QComboBox()
@@ -56,8 +56,8 @@ class PreprocessingSettingsDialog(QDialog):
             
             # NDI Threshold
             txt_thresh = QLineEdit()
-            txt_thresh.setPlaceholderText("e.g. 1e-4")
-            txt_thresh.setText(str(self.params.get("ndi_threshold", 1e-4)))
+            txt_thresh.setPlaceholderText("e.g. 1000.0")
+            txt_thresh.setText(str(self.params.get("ndi_threshold", 1000.0)))
             form.addRow("NDI Threshold:", txt_thresh)
             self.inputs["ndi_threshold"] = txt_thresh
             
@@ -97,7 +97,7 @@ class PreprocessingSettingsDialog(QDialog):
                     try:
                         new_params[key] = float(widget.text())
                     except:
-                        new_params[key] = 1e-4
+                        new_params[key] = 1000.0
         return new_params
 
 class TabAnalysis(QWidget):
@@ -258,36 +258,8 @@ class TabAnalysis(QWidget):
         self.list_prep.model().rowsMoved.connect(self.update_params)
         self.list_prep.itemDoubleClicked.connect(self.open_prep_settings)
         
-        steps = [
-            ("Baseline Correction (Min Sub)", "MinSub"),
-            ("Savitzky-Golay (Smoothing/Deriv)", "SG"),
-            ("Simple Derivative (Gap Diff)", "SimpleDeriv"),
-            ("L2 Normalization", "L2"),
-            ("Min-Max Normalization", "MinMax"),
-            ("Standard Normal Variate (SNV)", "SNV"),
-            ("Mean Centering", "Center"),
-            ("Rolling 3-Point Depth", "3PointDepth")
-        ]
-        for name, key in steps:
-            item = QListWidgetItem(name)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            item.setCheckState(Qt.Unchecked)
-            item.setData(Qt.UserRole, key)
-            item.setData(Qt.UserRole + 1, {}) # Store params dict here
-            
-            # Set default params
-            if key == "SG":
-                item.setData(Qt.UserRole + 1, {"win": 5, "poly": 2, "deriv": 0})
-            elif key == "SimpleDeriv":
-                item.setData(Qt.UserRole + 1, {"gap": 5, "order": 1, "ratio": False, "ndi_threshold": 1e-4})
-            elif key == "3PointDepth":
-                item.setData(Qt.UserRole + 1, {"gap": 5})
-            elif key == "MinSub":
-                item.setData(Qt.UserRole + 1, {})
-                
-            self.list_prep.addItem(item)
         vbox_p.addWidget(self.list_prep)
-        
+
         btn_upd = QPushButton("Update All Graphs")
         btn_upd.clicked.connect(self.update_params)
         vbox_p.addWidget(btn_upd)
@@ -324,6 +296,57 @@ class TabAnalysis(QWidget):
         # Pan State
         self.pan_active = False
         self.pan_start = None
+
+        # Populate List (Safe to trigger updates now)
+        steps = self._get_default_prep_steps()
+        for name, key in steps:
+            self._add_prep_item(name, key, default_params=None, checked=False)
+
+    def _get_default_prep_steps(self):
+        return [
+            ("Baseline Correction (Min Sub)", "MinSub"),
+            ("Savitzky-Golay (Smoothing/Deriv)", "SG"),
+            ("Simple Derivative (Gap Diff)", "SimpleDeriv"),
+            ("L2 Normalization", "L2"),
+            ("Min-Max Normalization", "MinMax"),
+            ("Standard Normal Variate (SNV)", "SNV"),
+            ("Mean Centering", "Center"),
+            ("Rolling 3-Point Depth", "3PointDepth")
+        ]
+
+    def _add_prep_item(self, name, key, default_params=None, checked=False):
+        # Determine params
+        params = default_params
+        if params is None:
+            if key == "SG": params = {"win": 5, "poly": 2, "deriv": 0}
+            elif key == "SimpleDeriv": params = {"gap": 1, "order": 1, "ratio": False, "ndi_threshold": 1000.0}
+            elif key == "3PointDepth": params = {"gap": 5}
+            else: params = {}
+            
+        item = QListWidgetItem(name)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+        item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        item.setData(Qt.UserRole, key)
+        item.setData(Qt.UserRole + 1, params)
+        
+        self.list_prep.addItem(item)
+        self._update_item_label(item)
+
+    def _update_item_label(self, item):
+        key = item.data(Qt.UserRole)
+        params = item.data(Qt.UserRole + 1)
+        base_name = item.text().split(" [")[0]
+        
+        lbl = base_name
+        if key == "SG":
+            lbl = f"{base_name} [w={params.get('win',5)}, p={params.get('poly',2)}, d={params.get('deriv',0)}]"
+        elif key == "SimpleDeriv":
+            lbl = f"{base_name} [Gap={params.get('gap',1)}, Ord={params.get('order',1)}]"
+            if params.get("ratio", False): lbl += f" (NDI, Th={params.get('ndi_threshold', 1000.0)})"
+        elif key == "3PointDepth":
+            lbl = f"{base_name} [Gap={params.get('gap', 5)}]"
+            
+        item.setText(lbl)
 
     def on_mode_changed(self, is_ref):
         if is_ref:
@@ -369,21 +392,8 @@ class TabAnalysis(QWidget):
             new_params = dlg.get_params()
             item.setData(Qt.UserRole + 1, new_params)
             
-            # Construct human-readable label appendage
-            base_name = item.text().split(" [")[0] # Removing existing params if any
-            if key == "SG":
-                lbl = f"{base_name} [w={new_params['win']}, p={new_params['poly']}, d={new_params['deriv']}]"
-            elif key == "SimpleDeriv":
-                lbl = f"{base_name} [Gap={new_params['gap']}, Ord={new_params['order']}]"
-                if new_params.get("ratio", False):
-                    lbl += f" (NDI, Th={new_params.get('ndi_threshold', 1e-4)})"
-            elif key == "3PointDepth":
-                 lbl = f"{base_name} [Gap={new_params['gap']}]"
-            else:
-                lbl = base_name
-                
-            item.setText(lbl)
-            item.setText(lbl)
+            # Construct human-readable label appendage (Refactored to shared method)
+            self._update_item_label(item)
             # self.update_params() # Handled by itemChanged signal (setText triggers it)
         
     def refresh_file_list(self):
@@ -452,35 +462,48 @@ class TabAnalysis(QWidget):
             if self.analysis_vm.exclude_bands_str:
                 self.txt_exclude.setText(self.analysis_vm.exclude_bands_str)
             
-            # Preprocessing Chain
-            # First uncheck all
-            for i in range(self.list_prep.count()):
-                self.list_prep.item(i).setCheckState(Qt.Unchecked)
+            # Preprocessing Chain Restore
+            full_state = self.analysis_vm.get_full_state()
             
-            # Recheck and restore params
-            for step in self.analysis_vm.prep_chain:
-                name = step.get('name')
-                p = step.get('params', {})
+            if full_state:
+                # 1. Full State Architecture (Preferred)
+                self.list_prep.clear()
                 
-                # Check Item and Set Params
+                # Check if any new algorithms are missing from state (e.g. app update)
+                existing_keys = [s['name'] for s in full_state]
+                
+                # Re-add saved items in order
+                for step in full_state:
+                    # Need to get the display name from the default steps list
+                    display_name = next((name for name, key in self._get_default_prep_steps() if key == step['name']), step['name'])
+                    self._add_prep_item(display_name, step['name'], step.get('params', {}), step.get('enabled', False))
+                    
+                # Add missing available algorithms (if any)
+                default_steps = self._get_default_prep_steps()
+                for name, key in default_steps:
+                    if key not in existing_keys:
+                        # Add default
+                         self._add_prep_item(name, key, {}, False)
+                         
+            else:
+                # 2. Legacy Fallback (Only active items known)
+                # First uncheck all
                 for i in range(self.list_prep.count()):
-                    item = self.list_prep.item(i)
-                    if item.data(Qt.UserRole) == name:
-                        item.setCheckState(Qt.Checked)
-                        item.setData(Qt.UserRole + 1, p) # Restore Params
-                        
-                        # Update Label
-                        base_name = item.text().split(" [")[0]
-                        lbl = base_name
-                        if name == "SG":
-                            lbl = f"{base_name} [w={p.get('win',5)}, p={p.get('poly',2)}, d={p.get('deriv',0)}]"
-                        elif name == "SimpleDeriv":
-                            lbl = f"{base_name} [Gap={p.get('gap',5)}, Ord={p.get('order',1)}]"
-                            if p.get("ratio", False): lbl += f" (NDI, Th={p.get('ndi_threshold', 1e-4)})"
-                        elif name == "3PointDepth":
-                            lbl = f"{base_name} [Gap={p.get('gap', 5)}]"
-                        item.setText(lbl)
-                        break
+                    self.list_prep.item(i).setCheckState(Qt.Unchecked)
+                
+                chain = self.analysis_vm.prep_chain # Only active
+                for step in chain:
+                    name = step.get('name')
+                    p = step.get('params', {})
+                    
+                    # Find and Check
+                    for i in range(self.list_prep.count()):
+                        item = self.list_prep.item(i)
+                        if item.data(Qt.UserRole) == name:
+                            item.setCheckState(Qt.Checked)
+                            item.setData(Qt.UserRole + 1, p)
+                            self._update_item_label(item)
+                            break
                         
             # Trigger Viz Update if any files checked
             self.update_viz()
@@ -521,17 +544,17 @@ class TabAnalysis(QWidget):
             ex_str = self.txt_exclude.text()
             self.analysis_vm.set_exclude_bands(ex_str)
             
-            # Chain
-            chain = []
+            # Full State (Order + Enabled + Params)
+            full_state = []
             for i in range(self.list_prep.count()):
                 item = self.list_prep.item(i)
-                if item.checkState() == Qt.Checked:
-                    key = item.data(Qt.UserRole)
-                    params = item.data(Qt.UserRole + 1)
-                    if params is None: params = {}
-                    chain.append({"name": key, "params": params})
+                key = item.data(Qt.UserRole)
+                params = item.data(Qt.UserRole + 1)
+                if params is None: params = {}
+                enabled = (item.checkState() == Qt.Checked)
+                full_state.append({"name": key, "params": params, "enabled": enabled})
             
-            self.analysis_vm.set_preprocessing_chain(chain)
+            self.analysis_vm.set_full_state(full_state)
             
             # Trigger Viz (Manual update requires calling viz, since signal is suppressed)
             self.update_viz()

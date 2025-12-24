@@ -174,19 +174,6 @@ class MainWindow(QMainWindow):
             # self.status_bar.showMessage("Auto-saved.", 1000) # Optional feedback
 
     def _do_save(self, path):
-        # Extract SG params
-        sg_win = "5"
-        sg_poly = "2"
-        sg_deriv = "0"
-        
-        for step in self.analysis_vm.prep_chain:
-            if step['name'] == 'SG':
-                p = step.get('params', {})
-                sg_win = str(p.get('win', 5))
-                sg_poly = str(p.get('poly', 2))
-                sg_deriv = str(p.get('deriv', 0))
-                break
-
         cfg = {
             "file_groups": self.main_vm.file_groups,
             "group_colors": self.main_vm.group_colors,
@@ -197,9 +184,7 @@ class MainWindow(QMainWindow):
             "mask_band": self.analysis_vm.mask_rules if self.analysis_vm.mask_rules else "Mean",
             "exclude_bands": self.analysis_vm.exclude_bands_str,
             "prep_chain": self.analysis_vm.prep_chain,
-            "sg_win": sg_win,
-            "sg_poly": sg_poly,
-            "sg_deriv": sg_deriv
+            "preprocessing_state": self.analysis_vm.get_full_state()
         }
         try:
             with open(path, "w") as f:
@@ -248,8 +233,10 @@ class MainWindow(QMainWindow):
             else:
                 self.analysis_vm.mask_rules = None
             
-            if "prep_chain" in cfg:
-                self.analysis_vm.prep_chain = cfg["prep_chain"]
+            if "preprocessing_state" in cfg:
+                 self.analysis_vm.set_full_state(cfg["preprocessing_state"])
+            elif "prep_chain" in cfg:
+                self.analysis_vm.set_preprocessing_chain(cfg["prep_chain"])
                 
              # Exclude Bands
             if "exclude_bands" in cfg:
