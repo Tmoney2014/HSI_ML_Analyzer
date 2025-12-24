@@ -295,7 +295,8 @@ class TrainingViewModel(QObject):
                 use_ref=self.analysis_vm.use_ref,
                 mask_rules=self.analysis_vm.mask_rules,
                 label_map=label_map,
-                colors_map=colors_map
+                colors_map=colors_map,
+                exclude_rules=self.analysis_vm.exclude_bands_str
             )
             self.log_message.emit(f"Saved to {output_path}")
             self.progress_update.emit(100)

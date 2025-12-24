@@ -22,8 +22,8 @@ class TabTraining(QWidget):
         hbox_model = QHBoxLayout()
         hbox_model.addWidget(QLabel("Algorithm:"))
         self.combo_model = QComboBox()
-        self.combo_model.addItems(["Linear SVM", "PLS-DA"])
-        self.combo_model.setToolTip("Select the ML algorithm.")
+        self.combo_model.addItems(["Linear SVM", "PLS-DA", "LDA"]) 
+        self.combo_model.setToolTip("Select training algorithm.\nLDA/PLS-DA are recommended for spectral data.")
         hbox_model.addWidget(self.combo_model)
         vbox.addLayout(hbox_model)
         

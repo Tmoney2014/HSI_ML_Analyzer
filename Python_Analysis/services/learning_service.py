@@ -7,6 +7,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.preprocessing import OneHotEncoder
 
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+
 class LearningService:
     def train_model(self, X, y, model_type="Linear SVM", test_ratio=0.2):
         """
@@ -15,7 +17,7 @@ class LearningService:
         Args:
             X: Data matrix
             y: Labels
-            model_type: "Linear SVM", "PLS-DA"
+            model_type: "Linear SVM", "PLS-DA", "LDA"
             test_ratio: Validation split ratio (0.1 ~ 0.5)
             
         Returns:
@@ -31,6 +33,8 @@ class LearningService:
             return self._train_svm(X, y, test_ratio)
         elif model_type == "PLS-DA":
             return self._train_pls(X, y, test_ratio)
+        elif model_type == "LDA":
+            return self._train_lda(X, y, test_ratio)
         else:
             print(f"   [Error] Unknown Model Type: {model_type}, falling back to SVM.")
             return self._train_svm(X, y, test_ratio)
@@ -48,6 +52,19 @@ class LearningService:
             return model, acc
         except Exception as e:
             print(f"   [Error] SVM Training Failed: {e}")
+            raise
+
+    def _train_lda(self, X, y, test_ratio):
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
+        model = LinearDiscriminantAnalysis() # Defaults are usually good
+        try:
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            print(f"   [LearningService] LDA Accuracy: {acc*100:.2f}%")
+            return model, acc
+        except Exception as e:
+            print(f"   [Error] LDA Training Failed: {e}")
             raise
 
     def _train_pls(self, X, y, test_ratio):
@@ -135,10 +152,10 @@ class LearningService:
 
     # ----------------------------------------
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, use_ref=False, mask_rules=None, label_map=None, colors_map=None):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, use_ref=False, mask_rules=None, label_map=None, colors_map=None, exclude_rules=None):
         """
         Export model to JSON for C#.
-        Handles SVM and PLS-DA (Linear Only).
+        Handles SVM, PLS-DA, and LDA (Linear Only).
         """
         model_type_name = type(model).__name__
         
@@ -148,19 +165,26 @@ class LearningService:
         is_multiclass = False
         
         # 1. Extract Weights based on Model Type
-        if isinstance(model, LinearSVC):
+        if isinstance(model, LinearSVC) or isinstance(model, LinearDiscriminantAnalysis):
+            # Both LinearSVC and LDA share similar coef_ structure
             if model.coef_.ndim > 1 and model.coef_.shape[0] > 1:
                 weights = model.coef_.tolist()
                 bias = model.intercept_.tolist()
                 is_multiclass = True
             else:
-                weights = model.coef_[0].tolist()
+                # Binary or Single Class
+                if model.coef_.ndim == 1:
+                     weights = model.coef_.tolist()
+                else:
+                     weights = model.coef_[0].tolist()
+                
                 # Ensure bias is float
                 if hasattr(model.intercept_, '__len__') and len(model.intercept_) > 0:
                    bias = float(model.intercept_[0])
                 else: 
                    bias = float(model.intercept_) # Fallback
                 is_multiclass = False
+
                 
         elif isinstance(model, PLSRegression):
             # Use our monkey-patched attributes
@@ -186,8 +210,7 @@ class LearningService:
         else:
              print(f"   [Error] Unsupported model type for export: {model_type_name}")
              return
-
-        # ... (Preprocessing config logic same as before) ...
+        
         # Convert prep_chain to flat format
         prep_flat = {
             "ApplySG": False, "SGWin": 5, "SGPoly": 2,
@@ -214,6 +237,7 @@ class LearningService:
             "ModelType": "LinearModel", # Unified name
             "OriginalType": model_type_name,
             "SelectedBands": [int(b) for b in selected_bands],
+            "ExcludeBands": exclude_rules if exclude_rules else "",
             "Weights": weights,
             "Bias": bias,
             "IsMultiClass": is_multiclass,

@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
             "use_ref": self.main_vm.use_ref,
             "threshold": str(self.analysis_vm.threshold),
             "mask_band": self.analysis_vm.mask_rules if self.analysis_vm.mask_rules else "Mean",
+            "exclude_bands": self.analysis_vm.exclude_bands_str,
             "prep_chain": self.analysis_vm.prep_chain,
             "sg_win": sg_win,
             "sg_poly": sg_poly,
@@ -249,6 +250,10 @@ class MainWindow(QMainWindow):
             
             if "prep_chain" in cfg:
                 self.analysis_vm.prep_chain = cfg["prep_chain"]
+                
+             # Exclude Bands
+            if "exclude_bands" in cfg:
+                self.analysis_vm.exclude_bands_str = cfg["exclude_bands"]
             
             # Restore UI
             self.tab_analysis.restore_ui()
