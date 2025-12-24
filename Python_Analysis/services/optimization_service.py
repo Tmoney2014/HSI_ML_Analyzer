@@ -48,7 +48,7 @@ class OptimizationService(QObject):
                 
         if target_prep:
             self.log_message.emit(f"\n[Phase 1] optimizing Gap Size for {target_prep['name']}...")
-            start_gap = target_prep['params'].get('gap', 5)
+            start_gap = target_prep['params'].get('gap', 1)
             self.log_message.emit(f"   Start Gap: {start_gap}")
             
             # Define Tuner Callback for Gap
@@ -90,7 +90,7 @@ class OptimizationService(QObject):
         
         if ndi_step:
             self.log_message.emit(f"\n[Phase 2] Optimizing NDI Threshold...")
-            start_th = ndi_step['params'].get('ndi_threshold', 100)
+            start_th = ndi_step['params'].get('ndi_threshold', 1000.0)
             if start_th < 1: start_th = 50 # Force start reasonable
             self.log_message.emit(f"   Start Threshold: {start_th}")
             
