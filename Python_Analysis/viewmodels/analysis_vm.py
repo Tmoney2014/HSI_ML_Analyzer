@@ -22,8 +22,8 @@ class AnalysisViewModel(QObject):
         # self.use_ref delegated to MainVM
         
         # Preprocessing Chain
-        # List of dicts: {"name": "SG", "params": {...}}
-        self.prep_chain = []
+        # Full State: List of dicts: {"name": "SG", "params": {...}, "enabled": bool}
+        self._full_state = []
         
         # Connect to main VM signals if needed
         # self.main_vm.files_changed.connect(self.on_data_changed)
@@ -32,10 +32,37 @@ class AnalysisViewModel(QObject):
     def use_ref(self):
         return self.main_vm.use_ref
         
-    def set_preprocessing_chain(self, chain):
-        self.prep_chain = chain
+    @property
+    def prep_chain(self):
+        """Returns only enabled steps for processing engine."""
+        return [{"name": s["name"], "params": s["params"]} for s in self._full_state if s.get("enabled", False)]
+
+    @prep_chain.setter
+    def prep_chain(self, chain):
+        """Legacy Setter: Reconstructs full state from active chain list."""
+        # This is complex because we lose info about disabled steps.
+        # Minimal implementation: Just assume these are the ONLY steps and they are enabled.
+        # In practice, load_project_file handles full state separately.
+        self._full_state = []
+        for step in chain:
+            new_step = step.copy()
+            new_step["enabled"] = True
+            self._full_state.append(new_step)
         self.params_changed.emit()
         self.model_updated.emit()
+
+    def set_full_state(self, state):
+        """Set complete state from UI (includes disabled items)."""
+        self._full_state = state
+        self.params_changed.emit()
+        self.model_updated.emit()
+        
+    def get_full_state(self):
+        return self._full_state
+
+    # Deprecated/Legacy method support (mapped to setter)
+    def set_preprocessing_chain(self, chain):
+        self.prep_chain = chain
 
     def set_threshold(self, val: float):
         self.threshold = val
