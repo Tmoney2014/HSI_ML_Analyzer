@@ -152,7 +152,7 @@ class LearningService:
 
     # ----------------------------------------
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, use_ref=False, mask_rules=None, label_map=None, colors_map=None, exclude_rules=None):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, use_ref=False, mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None):
         """
         Export model to JSON for C#.
         Handles SVM, PLS-DA, and LDA (Linear Only).
@@ -217,7 +217,8 @@ class LearningService:
             "ApplyDeriv": False, "Gap": 5, "DerivOrder": 1,
             "ApplyL2": False, "ApplyMinMax": False, "ApplySNV": False, "ApplyCenter": False,
             "Mode": "Reflectance" if use_ref else "Raw",
-            "MaskRules": mask_rules if mask_rules else "Mean"
+            "MaskRules": mask_rules if mask_rules else "Mean",
+            "Threshold": str(threshold) if threshold is not None else "0.0"
         }
         
         if preprocessing_config:

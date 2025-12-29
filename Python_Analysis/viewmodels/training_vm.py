@@ -332,7 +332,8 @@ class TrainingViewModel(QObject):
                 mask_rules=self.analysis_vm.mask_rules,
                 label_map=label_map,
                 colors_map=colors_map,
-                exclude_rules=self.analysis_vm.exclude_bands_str
+                exclude_rules=self.analysis_vm.exclude_bands_str,
+                threshold=self.analysis_vm.threshold
             )
             self.log_message.emit(f"Saved to {output_path}")
             self.progress_update.emit(100)
