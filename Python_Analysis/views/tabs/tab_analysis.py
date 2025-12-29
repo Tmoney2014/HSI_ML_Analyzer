@@ -642,6 +642,7 @@ class TabAnalysis(QWidget):
             
         finally:
             progress.close()
+            progress.deleteLater()
 
     def reload_data_cache(self):
         # Clear VM Cache
