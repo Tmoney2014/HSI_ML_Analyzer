@@ -152,7 +152,7 @@ class LearningService:
 
     # ----------------------------------------
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, use_ref=False, mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None):
         """
         Export model to JSON for C#.
         Handles SVM, PLS-DA, and LDA (Linear Only).
@@ -215,8 +215,8 @@ class LearningService:
         prep_flat = {
             "ApplySG": False, "SGWin": 5, "SGPoly": 2,
             "ApplyDeriv": False, "Gap": 5, "DerivOrder": 1,
-            "ApplyL2": False, "ApplyMinMax": False, "ApplySNV": False, "ApplyCenter": False,
-            "Mode": "Reflectance" if use_ref else "Raw",
+            "ApplyL2": False, "ApplyMinMax": False, "ApplySNV": False, "ApplyCenter": False, "ApplyAbsorbance": (processing_mode == "Absorbance"),
+            "Mode": processing_mode,
             "MaskRules": mask_rules if mask_rules else "Mean",
             "Threshold": str(threshold) if threshold is not None else "0.0"
         }
@@ -233,6 +233,7 @@ class LearningService:
                 elif name == "MinMax": prep_flat["ApplyMinMax"] = True
                 elif name == "SNV": prep_flat["ApplySNV"] = True
                 elif name == "Center": prep_flat["ApplyCenter"] = True
+                # Absorbance is handled by Mode
         
         export_data = {
             "ModelType": "LinearModel", # Unified name

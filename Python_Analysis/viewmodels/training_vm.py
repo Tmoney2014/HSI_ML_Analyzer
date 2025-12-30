@@ -128,7 +128,9 @@ class TrainingViewModel(QObject):
             self.log_message.emit(f"   Model: {model_type}, Test Ratio: {test_ratio}")
         
         # Log Preprocessing Params
-        param_log = [f"Bands={n_features}"]
+        mode = self.analysis_vm.processing_mode
+        threshold = self.analysis_vm.threshold
+        param_log = [f"Mode={mode}", f"Threshold={threshold}", f"Bands={n_features}"]
         for step in self.analysis_vm.prep_chain:
             name = step['name']
             p_str = ", ".join([f"{k}={v}" for k, v in step['params'].items()])
@@ -156,8 +158,14 @@ class TrainingViewModel(QObject):
                         cube, waves = load_hsi_data(f)
                         cube = np.nan_to_num(cube)
                         
-                        if self.analysis_vm.use_ref:
+                        mode = self.analysis_vm.processing_mode
+                        if mode == "Reflectance":
                              cube = self.analysis_vm._convert_to_ref(cube)
+                        elif mode == "Absorbance":
+                             cube = self.analysis_vm._convert_to_ref(cube)
+                             # Absorbance application moved to loop for consistency? 
+                             # No, apply it immediately after ref like in AnalysisVM
+                             cube = processing.apply_absorbance(cube)
                              
                         mask = processing.create_background_mask(cube, self.analysis_vm.threshold, self.analysis_vm.mask_rules)
                         # Ensure mask is boolean
@@ -177,6 +185,8 @@ class TrainingViewModel(QObject):
                             elif name == "MinSub": data = processing.apply_min_subtraction(data)
                             elif name == "MinMax": data = processing.apply_minmax_norm(data)
                             elif name == "Center": data = processing.apply_mean_centering(data)
+                            elif name == "Center": data = processing.apply_mean_centering(data)
+                            # Absorbance handled by Mode
                         
                         data = np.nan_to_num(data)
                         
@@ -328,7 +338,7 @@ class TrainingViewModel(QObject):
                 selected_bands, 
                 output_path, 
                 preprocessing_config=self.analysis_vm.prep_chain,
-                use_ref=self.analysis_vm.use_ref,
+                processing_mode=self.analysis_vm.processing_mode,
                 mask_rules=self.analysis_vm.mask_rules,
                 label_map=label_map,
                 colors_map=colors_map,

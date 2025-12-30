@@ -25,24 +25,35 @@ class AnalysisViewModel(QObject):
         # Full State: List of dicts: {"name": "SG", "params": {...}, "enabled": bool}
         self._full_state = []
         
-        # Connect to main VM signals if needed
-        # self.main_vm.files_changed.connect(self.on_data_changed)
+        # Connect to main VM signals
+        self.main_vm.mode_changed.connect(self.on_mode_changed)
+        
+    def on_mode_changed(self, mode):
+        # Trigger re-processing when mode changes
+        self.params_changed.emit()
+        self.model_updated.emit()
         
     @property
+    def processing_mode(self):
+        return self.main_vm.processing_mode
+
+    @property
     def use_ref(self):
-        return self.main_vm.use_ref
+        # Compatibility property
+        return self.processing_mode in ["Reflectance", "Absorbance"]
         
     @property
     def prep_chain(self):
         """Returns only enabled steps for processing engine."""
         return [{"name": s["name"], "params": s["params"]} for s in self._full_state if s.get("enabled", False)]
 
+    # ... (skipping setter) ...
+
+    # ...
+
     @prep_chain.setter
     def prep_chain(self, chain):
         """Legacy Setter: Reconstructs full state from active chain list."""
-        # This is complex because we lose info about disabled steps.
-        # Minimal implementation: Just assume these are the ONLY steps and they are enabled.
-        # In practice, load_project_file handles full state separately.
         self._full_state = []
         for step in chain:
             new_step = step.copy()
@@ -147,27 +158,29 @@ class AnalysisViewModel(QObject):
                 # Cache it
                 self.main_vm.data_cache[file_path] = (cube, waves)
             
-            # 2. Reflectance Conversion?
-            if self.use_ref:
+            # 2. Mode Conversion (Reflectance / Absorbance)
+            mode = self.processing_mode
+            if mode == "Reflectance":
                 cube = self._convert_to_ref(cube)
+            elif mode == "Absorbance":
+                cube = self._convert_to_ref(cube)
+                cube = processing.apply_absorbance(cube)
                 
             # 3. Masking
             mask = processing.create_background_mask(cube, self.threshold, self.mask_rules)
             valid_pixels = processing.apply_mask(cube, mask)
             
-            print(f"[Debug] File: {file_path}")
-            print(f"[Debug] Threshold: {self.threshold}, Rules: {self.mask_rules}")
-            print(f"[Debug] Cube Shape: {cube.shape}, Valid Pixels: {valid_pixels.shape[0]}")
+            print(f"[DEBUG] Mode: {mode}, Threshold: {self.threshold}, MaskRules: {self.mask_rules}")
+            print(f"[DEBUG] Total Pixels: {cube.shape[0]*cube.shape[1]}, Valid Pixels: {valid_pixels.shape[0]}")
 
             if valid_pixels.size == 0:
-                print("[Debug] No valid pixels found!")
+                print("[WARN] All pixels masked! Check Threshold.")
                 return None, waves
                 
             # 4. Mean Spectrum
             mean_spec = np.mean(valid_pixels, axis=0)
             
             # 5. Apply Chain
-            # Expect chain items like: {'name': 'SG', 'params': {...}}
             processed = mean_spec[np.newaxis, :] # Make 2D (1, Bands) for functions
             
             for step in self.prep_chain:
@@ -194,6 +207,8 @@ class AnalysisViewModel(QObject):
                 elif name == "Center":
                     processed = processing.apply_mean_centering(processed)
                 
+                # Absorbance step removed from list logic
+                
                 processed = np.nan_to_num(processed)
                 
             return processed.flatten(), waves
@@ -203,14 +218,50 @@ class AnalysisViewModel(QObject):
             return None, None
 
     def _convert_to_ref(self, raw_cube):
-        # Use Cached Vectors from MainVM
+        # 1. Lazy Load White Ref
+        if self.main_vm.cache_white is None and self.main_vm.white_ref:
+            try:
+                print(f"[DEBUG] Lazy Loading White Ref: {self.main_vm.white_ref}")
+                w_data, _ = load_hsi_data(self.main_vm.white_ref)
+                if w_data is None:
+                    print("[DEBUG] White Ref Load Failed (None)")
+                else:
+                    print(f"[DEBUG] White Ref Data Shape: {w_data.shape}")
+                    # Average to 1D pattern (mean of spatial pixels)
+                    # Assumes w_data is (H, W, Bands) or (N, Bands)
+                    # We need a 1D vector (Bands,)
+                    w_vec = np.nanmean(w_data.reshape(-1, w_data.shape[-1]), axis=0)
+                    self.main_vm.cache_white = w_vec
+                    print(f"[DEBUG] Cache White Set. Vector Shape: {w_vec.shape}")
+            except Exception as e:
+                print(f"[ERROR] Error loading White Ref: {e}")
+                
+        # 2. Lazy Load Dark Ref
+        if self.main_vm.cache_dark is None and self.main_vm.dark_ref:
+            try:
+                print(f"[DEBUG] Lazy Loading Dark Ref: {self.main_vm.dark_ref}")
+                d_data, _ = load_hsi_data(self.main_vm.dark_ref)
+                d_vec = np.nanmean(d_data.reshape(-1, d_data.shape[-1]), axis=0)
+                self.main_vm.cache_dark = d_vec
+                print(f"[DEBUG] Cache Dark Set.")
+            except Exception as e:
+                print(f"[ERROR] Error loading Dark Ref: {e}")
+
+        # 3. Apply
         w_vec = self.main_vm.cache_white
         d_vec = self.main_vm.cache_dark
         
-        if w_vec is None: return raw_cube
+        if w_vec is None: 
+            # print("[DEBUG] White Ref is None, returning Raw") # Too noisy for loop
+            return raw_cube
         
-        d = d_vec if d_vec is not None else 0
+        d = d_vec if d_vec is not None else np.zeros_like(w_vec)
         
+        # Check shapes
+        if raw_cube.shape[-1] != w_vec.shape[0]:
+            print(f"[ERROR] Band Mismatch: Cube {raw_cube.shape} vs White {w_vec.shape}")
+            return raw_cube
+
         numerator = raw_cube - d
         denominator = w_vec - d
         

@@ -178,18 +178,21 @@ class TabData(QWidget):
         grp_mode = QGroupBox("Processing Mode")
         vbox_m = QVBoxLayout()
         from PyQt5.QtWidgets import QRadioButton, QButtonGroup
-        self.radio_raw = QRadioButton("Raw Data Mode (DN)")
-        self.radio_ref = QRadioButton("Reflectance Mode")
+        self.radio_raw = QRadioButton("Raw Data (DN)")
+        self.radio_ref = QRadioButton("Reflectance")
+        self.radio_abs = QRadioButton("Pseudo-Absorbance (-log)")
         self.radio_raw.setChecked(True)
         
         self.bg = QButtonGroup(self)
         self.bg.addButton(self.radio_raw)
         self.bg.addButton(self.radio_ref)
+        self.bg.addButton(self.radio_abs)
         
-        self.radio_ref.toggled.connect(self.on_mode_change)
+        self.bg.buttonClicked.connect(self.on_mode_change)
         
         vbox_m.addWidget(self.radio_raw)
         vbox_m.addWidget(self.radio_ref)
+        vbox_m.addWidget(self.radio_abs)
         grp_mode.setLayout(vbox_m)
         vbox_r.addWidget(grp_mode)
         
@@ -204,15 +207,20 @@ class TabData(QWidget):
         grp_ref.setLayout(vbox_r)
         layout.addWidget(grp_ref)
         
-    def on_mode_change(self, checked):
-        if self.radio_ref.isChecked():
+    def on_mode_change(self, btn):
+        if self.radio_ref.isChecked() or self.radio_abs.isChecked():
             if not self.vm.white_ref or not os.path.exists(self.vm.white_ref):
-                QMessageBox.warning(self, "Error", "Cannot switch to Reflectance Mode!\nPlease load a White Reference file first.")
+                QMessageBox.warning(self, "Error", "Cannot switch mode!\nPlease load a White Reference first.")
                 self.radio_raw.setChecked(True)
+                self.vm.set_processing_mode("Raw")
                 return
-            self.vm.set_use_ref(True)
+            
+            if self.radio_ref.isChecked():
+                self.vm.set_processing_mode("Reflectance")
+            else:
+                self.vm.set_processing_mode("Absorbance")
         else:
-            self.vm.set_use_ref(False)
+            self.vm.set_processing_mode("Raw")
 
     # --- Group Handlers ---
     def add_group_click(self):

@@ -179,7 +179,8 @@ class MainWindow(QMainWindow):
             "group_colors": self.main_vm.group_colors,
             "white_ref": self.main_vm.white_ref,
             "dark_ref": self.main_vm.dark_ref,
-            "use_ref": self.main_vm.use_ref,
+            "processing_mode": self.main_vm.processing_mode,
+            "use_ref": self.main_vm.use_ref, # Legacy support
             "threshold": str(self.analysis_vm.threshold),
             "mask_band": self.analysis_vm.mask_rules if self.analysis_vm.mask_rules else "Mean",
             "exclude_bands": self.analysis_vm.exclude_bands_str,
@@ -219,7 +220,14 @@ class MainWindow(QMainWindow):
             if w_ref: self.main_vm.set_white_ref(w_ref)
             if d_ref: self.main_vm.set_dark_ref(d_ref)
             
-            if "use_ref" in cfg: 
+            if "processing_mode" in cfg:
+                self.main_vm.set_processing_mode(cfg["processing_mode"])
+                if hasattr(self.tab_data, 'radio_abs'):
+                    mode = cfg["processing_mode"]
+                    if mode == "Reflectance": self.tab_data.radio_ref.setChecked(True)
+                    elif mode == "Absorbance": self.tab_data.radio_abs.setChecked(True)
+                    else: self.tab_data.radio_raw.setChecked(True)
+            elif "use_ref" in cfg: 
                 self.main_vm.set_use_ref(cfg["use_ref"])
                 if hasattr(self.tab_data, 'radio_ref'):
                      self.tab_data.radio_ref.setChecked(cfg["use_ref"])

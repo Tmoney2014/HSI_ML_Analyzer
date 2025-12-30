@@ -8,7 +8,7 @@ class MainViewModel(QObject):
     # Signals to notify Views of changes
     files_changed = pyqtSignal()
     refs_changed = pyqtSignal()
-    mode_changed = pyqtSignal(bool) # True=Reflectance, False=Raw
+    mode_changed = pyqtSignal(str) # "Raw", "Reflectance", "Absorbance"
     save_requested = pyqtSignal() # New signal for manual save
 
     def __init__(self):
@@ -20,7 +20,7 @@ class MainViewModel(QObject):
         
         self.white_ref: str = ""
         self.dark_ref: str = ""
-        self.use_ref: bool = False
+        self.processing_mode: str = "Raw" # Default
         
         # Cache for loaded cubes to avoid re-reading disk (path -> (cube, waves))
         self.data_cache = {}
@@ -38,7 +38,7 @@ class MainViewModel(QObject):
         self.group_colors.clear()
         self.white_ref = ""
         self.dark_ref = ""
-        self.use_ref = False
+        self.processing_mode = "Raw"
         self.data_cache.clear()
         self.cache_white = None
         self.cache_dark = None
@@ -50,12 +50,34 @@ class MainViewModel(QObject):
         
         self.files_changed.emit()
         self.refs_changed.emit()
-        self.mode_changed.emit(False)
+        self.mode_changed.emit("Raw")
 
     def set_use_ref(self, enabled: bool):
-        if self.use_ref != enabled:
-            self.use_ref = enabled
-            self.mode_changed.emit(enabled)
+        # Compatibility Shim
+        mode = "Reflectance" if enabled else "Raw"
+        self.set_processing_mode(mode)
+
+    @property
+    def use_ref(self) -> bool:
+        return self.processing_mode in ["Reflectance", "Absorbance"]
+
+    def set_processing_mode(self, mode: str):
+        if mode not in ["Raw", "Reflectance", "Absorbance"]:
+            return
+            
+        if self.processing_mode != mode:
+            self.processing_mode = mode
+            self.mode_changed.emit(mode)
+
+    def set_white_ref(self, path: str):
+        self.white_ref = path
+        self.cache_white = None  # Invalidate cache
+        self.refs_changed.emit()
+
+    def set_dark_ref(self, path: str):
+        self.dark_ref = path
+        self.cache_dark = None # Invalidate cache
+        self.refs_changed.emit()
 
     # --- Group Management ---
     def add_group(self, name: str):

@@ -94,13 +94,17 @@ class ImageViewer(QWidget):
 
         try:
             # 1. Logic (Sync with VM Params)
-            is_ref = self.vm.use_ref
+            mode = self.vm.processing_mode
             threshold = self.vm.threshold
             
-            if is_ref:
-                data_viz = self.vm._convert_to_ref(self.cube) # Helper access
+            # Helper: Get Ref or Raw
+            if mode in ["Reflectance", "Absorbance"]:
+                data_viz = self.vm._convert_to_ref(self.cube)
+                if mode == "Absorbance":
+                    data_viz = processing.apply_absorbance(data_viz)
             else:
                 data_viz = self.cube
+            
             self.processed_cube = data_viz
             
             mask = processing.create_background_mask(data_viz, threshold, self.vm.mask_rules)

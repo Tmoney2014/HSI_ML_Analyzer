@@ -384,7 +384,7 @@ class TabAnalysis(QWidget):
         
         
         # Non-configurable methods: Ignore Double Click
-        if key in ["MinSub", "L2", "MinMax", "SNV", "Center"]:
+        if key in ["MinSub", "L2", "MinMax", "SNV", "Center", "Absorbance"]:
             return
             
         dlg = PreprocessingSettingsDialog(key, params, self)
@@ -474,6 +474,7 @@ class TabAnalysis(QWidget):
                 
                 # Re-add saved items in order
                 for step in full_state:
+                    if step['name'] == 'Absorbance': continue # Force remove
                     # Need to get the display name from the default steps list
                     display_name = next((name for name, key in self._get_default_prep_steps() if key == step['name']), step['name'])
                     self._add_prep_item(display_name, step['name'], step.get('params', {}), step.get('enabled', False))

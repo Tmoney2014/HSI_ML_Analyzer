@@ -221,3 +221,27 @@ def apply_rolling_3point_depth(data, gap: int = 5):
     depth_data[mask_valid] = 1.0 - (C[mask_valid] / (baseline[mask_valid] + epsilon))
     
     return depth_data
+
+def apply_absorbance(data, epsilon=1e-6):
+    """
+    /// <ai>AI가 작성함</ai>
+    Apply Pseudo-Absorbance Transformation.
+    Formula: A = -log10(R)
+    
+    Args:
+        data: (N_pixels, Bands) - usually Reflectance (0~1)
+        epsilon: Safety margin to avoid log(0)
+        
+    Returns:
+        absorbance_data: (N_pixels, Bands)
+    """
+    # 1. Safety Clipping (0 이하, 음수 방지)
+    # 데이터가 0이면 log가 무한대로 발산하므로 아주 작은 값으로 대체
+    local_R = np.maximum(data, epsilon)
+    
+    # 2. Log Transformation
+    # Reflectance가 1.0보다 크면 음수가 나올 수 있는데, 보통 흡광도는 양수 취급
+    # 하지만 물리적으로 형광이 아니면 R<=1.0 이므로, 그냥 로그 취함.
+    absorbance = -np.log10(local_R)
+    
+    return absorbance
