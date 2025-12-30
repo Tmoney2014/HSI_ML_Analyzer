@@ -130,7 +130,9 @@ class TrainingViewModel(QObject):
         # Log Preprocessing Params
         mode = self.analysis_vm.processing_mode
         threshold = self.analysis_vm.threshold
-        param_log = [f"Mode={mode}", f"Threshold={threshold}", f"Bands={n_features}"]
+        mask_rules = self.analysis_vm.mask_rules if self.analysis_vm.mask_rules else "None"
+        
+        param_log = [f"Mode={mode}", f"Threshold={threshold}", f"MaskRules={mask_rules}", f"Bands={n_features}"]
         for step in self.analysis_vm.prep_chain:
             name = step['name']
             p_str = ", ".join([f"{k}={v}" for k, v in step['params'].items()])
@@ -226,12 +228,14 @@ class TrainingViewModel(QObject):
             self.progress_update.emit(60)
             
             # 2. Band Selection (SPA)
+            # Exclude current Mask bands from selection?
+            # For now, just pass exclude_indices if we had them.
             exclude_indices = self.analysis_vm.parse_exclude_bands()
             if exclude_indices:
                 if not silent: self.log_message.emit(f"Excluding {len(exclude_indices)} bands from selection...")
                 
             if not silent: self.log_message.emit(f"Selecting best {n_features} bands via SPA (Successive Projections Algorithm)...")
-            from utils.band_selection import select_best_bands
+            from services.band_selection_service import select_best_bands
             import matplotlib.pyplot as plt
 
             dummy_cube = X_train[:min(3000, X_train.shape[0])].reshape(-1, 1, X_train.shape[1])

@@ -1,7 +1,6 @@
 import os
 import spectral.io.envi as envi
 import numpy as np
-from models.hsi_data import HSIData
 
 def load_hsi_data(header_path: str) -> tuple:
     """
