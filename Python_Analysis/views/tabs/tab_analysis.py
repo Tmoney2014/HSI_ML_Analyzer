@@ -401,10 +401,15 @@ class TabAnalysis(QWidget):
             self.list_viz.clear()
             files = self.main_vm.get_all_files()
             for f in files:
-                item = QListWidgetItem(f"{os.path.basename(f)}  [{os.path.dirname(f)}]")
+                parent_dir = os.path.basename(os.path.dirname(f))
+                file_name = os.path.basename(f)
+                display_text = f"{parent_dir} / {file_name}"
+                
+                item = QListWidgetItem(display_text)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 item.setCheckState(Qt.Unchecked)
                 item.setData(Qt.UserRole, f)
+                item.setToolTip(f) # Show full path on hover
                 self.list_viz.addItem(item)
         except RuntimeError:
             # Widget deleted during shutdown - ignore
@@ -627,7 +632,12 @@ class TabAnalysis(QWidget):
                         x_axis = np.arange(len(spec))
                         
                     self.current_waves = x_axis
-                    ax.plot(x_axis, spec, label=os.path.basename(path), alpha=0.7)
+                    
+                    parent_dir = os.path.basename(os.path.dirname(path))
+                    file_name = os.path.basename(path)
+                    label_text = f"{parent_dir} / {file_name}"
+                    
+                    ax.plot(x_axis, spec, label=label_text, alpha=0.7)
             
             if not self.analysis_vm.use_ref and not self.analysis_vm.mask_rules:
                 if self.slider_thresh:
