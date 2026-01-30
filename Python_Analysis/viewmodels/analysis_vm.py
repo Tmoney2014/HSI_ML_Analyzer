@@ -25,11 +25,20 @@ class AnalysisViewModel(QObject):
         # Full State: List of dicts: {"name": "SG", "params": {...}, "enabled": bool}
         self._full_state = []
         
+        # --- Caching State ---
+        self._cached_file_path = None
+        self._cached_ref_cube = None # (H, W, B) after Ref convert (expensive)
+        self._cached_mask_params = None # (threshold, mask_rules)
+        self._cached_masked_mean = None # (B,) Mean Spectrum BEFORE Preprocessing
+        self._cached_prep_chain = None # For change detection
+        
         # Connect to main VM signals
         self.main_vm.mode_changed.connect(self.on_mode_changed)
         
     def on_mode_changed(self, mode):
         # Trigger re-processing when mode changes
+        self._cached_ref_cube = None # Mode changed -> Ref/Abs/Raw changed -> Invalidate Cude
+        self._cached_masked_mean = None 
         self.params_changed.emit()
         self.model_updated.emit()
         
@@ -59,31 +68,42 @@ class AnalysisViewModel(QObject):
             new_step = step.copy()
             new_step["enabled"] = True
             self._full_state.append(new_step)
+        self._invalidate_processing()
         self.params_changed.emit()
         self.model_updated.emit()
 
     def set_full_state(self, state):
         """Set complete state from UI (includes disabled items)."""
         self._full_state = state
+        self._invalidate_processing()
         self.params_changed.emit()
         self.model_updated.emit()
         
     def get_full_state(self):
         return self._full_state
+        
+    def _invalidate_processing(self):
+        """Call when only Preprocessing chain changes (Mask/Ref unchanged)"""
+        # We don't need to clear _cached_masked_mean
+        pass
 
     # Deprecated/Legacy method support (mapped to setter)
     def set_preprocessing_chain(self, chain):
         self.prep_chain = chain
 
     def set_threshold(self, val: float):
-        self.threshold = val
-        self.params_changed.emit()
-        self.model_updated.emit()
+        if self.threshold != val:
+            self.threshold = val
+            self._cached_masked_mean = None # Mask changed -> Mean changed
+            self.params_changed.emit()
+            self.model_updated.emit()
         
     def set_mask_rules(self, rules: str):
-        self.mask_rules = rules
-        self.params_changed.emit()
-        self.model_updated.emit()
+        if self.mask_rules != rules:
+            self.mask_rules = rules
+            self._cached_masked_mean = None # Mask changed -> Mean changed
+            self.params_changed.emit()
+            self.model_updated.emit()
         
     def set_exclude_bands(self, val: str):
         self.exclude_bands_str = val
@@ -122,65 +142,115 @@ class AnalysisViewModel(QObject):
     def add_step(self, step_name, params=None):
         step = {"name": step_name, "params": params or {}}
         self.prep_chain.append(step)
+        self._invalidate_processing()
         self.params_changed.emit()
         self.model_updated.emit()
         
     def remove_step(self, index):
         if 0 <= index < len(self.prep_chain):
             del self.prep_chain[index]
+            self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()
             
     def move_step(self, index, direction):
         if direction == -1 and index > 0:
             self.prep_chain[index], self.prep_chain[index-1] = self.prep_chain[index-1], self.prep_chain[index]
+            self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()
         elif direction == 1 and index < len(self.prep_chain) - 1:
             self.prep_chain[index], self.prep_chain[index+1] = self.prep_chain[index+1], self.prep_chain[index]
+            self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()
 
     def update_params(self, index, new_params):
         if 0 <= index < len(self.prep_chain):
             self.prep_chain[index]['params'] = new_params
+            self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()
         
     def get_processed_spectrum(self, file_path):
         try:
-            # 1. Load Data (Cache Check)
-            if file_path in self.main_vm.data_cache:
-                cube, waves = self.main_vm.data_cache[file_path]
-            else:
-                cube, waves = load_hsi_data(file_path)
-                cube = np.nan_to_num(cube)
-                # Cache it
-                self.main_vm.data_cache[file_path] = (cube, waves)
+            waves = None
             
-            # 2. Mode Conversion (Reflectance / Absorbance)
-            mode = self.processing_mode
-            if mode == "Reflectance":
-                cube = self._convert_to_ref(cube)
-            elif mode == "Absorbance":
-                cube = self._convert_to_ref(cube)
-                cube = processing.apply_absorbance(cube)
+            # -------------------------------------------------------------
+            # LEVEL 1: File Check & Mode Check (Reflectance Transformation)
+            # -------------------------------------------------------------
+            
+            # If file changed, we must reload (and invalidates everything)
+            file_changed = (file_path != self._cached_file_path)
+            
+            # If Ref Cache is missing (First load or Mode changed), we must compute it
+            if file_changed or self._cached_ref_cube is None:
+                # 1. Load Raw
+                if file_path in self.main_vm.data_cache:
+                    raw_cube, waves = self.main_vm.data_cache[file_path]
+                else:
+                    raw_cube, waves = load_hsi_data(file_path)
+                    raw_cube = np.nan_to_num(raw_cube)
+                    self.main_vm.data_cache[file_path] = (raw_cube, waves)
                 
-            # 3. Masking
-            mask = processing.create_background_mask(cube, self.threshold, self.mask_rules)
-            valid_pixels = processing.apply_mask(cube, mask)
-            
-            print(f"[DEBUG] Mode: {mode}, Threshold: {self.threshold}, MaskRules: {self.mask_rules}")
-            print(f"[DEBUG] Total Pixels: {cube.shape[0]*cube.shape[1]}, Valid Pixels: {valid_pixels.shape[0]}")
-
-            if valid_pixels.size == 0:
-                print("[WARN] All pixels masked! Check Threshold.")
-                return None, waves
+                # 2. Mode Conversion (Raw -> Ref, or Raw -> Abs)
+                mode = self.processing_mode
+                if mode == "Reflectance":
+                    self._cached_ref_cube = self._convert_to_ref(raw_cube)
+                elif mode == "Absorbance":
+                    # Optimization: create_background_mask might need Ref or Abs? 
+                    # Usually mask is done on Intensity (Raw or Ref). 
+                    # But Absorbance is -log(Ref).
+                    # Current logic: Ref -> Abs
+                    ref_cube = self._convert_to_ref(raw_cube)
+                    self._cached_ref_cube = processing.apply_absorbance(ref_cube)
+                else: # Raw
+                    self._cached_ref_cube = raw_cube
                 
-            # 4. Mean Spectrum
-            mean_spec = np.mean(valid_pixels, axis=0)
+                # Update Cache State
+                self._cached_file_path = file_path
+                self._cached_masked_mean = None # New data -> New mean needed
             
-            # 5. Apply Chain
+            # If we are here, self._cached_ref_cube has the correct Cube (Raw/Ref/Abs)
+            # Retrieve waves if not loaded above
+            if waves is None:
+                 if file_path in self.main_vm.data_cache:
+                     _, waves = self.main_vm.data_cache[file_path]
+            
+            # -------------------------------------------------------------
+            # LEVEL 2: Masking & Mean Calculation (Heavy Boolean Ops)
+            # -------------------------------------------------------------
+            
+            # Check if we need to re-calculate Mean
+            # Conditions: Mean cache empty OR Mask Params changed
+            # current_mask_params = (self.threshold, self.mask_rules)
+            
+            # Note: We rely on _cached_masked_mean being cleared by setters.
+            
+            if self._cached_masked_mean is None:
+                cube_to_mask = self._cached_ref_cube
+                
+                # Create mask (Always returns boolean mask)
+                mask = processing.create_background_mask(cube_to_mask, self.threshold, self.mask_rules)
+                valid_pixels = processing.apply_mask(cube_to_mask, mask)
+                
+                # print(f"[DEBUG] Re-Masking: Th={self.threshold}, Pixels={valid_pixels.shape[0]}")
+                
+                if valid_pixels.size == 0:
+                    # print("[WARN] All pixels masked!")
+                    return None, waves
+                    
+                # Compute Mean
+                self._cached_masked_mean = np.mean(valid_pixels, axis=0)
+                
+            # -------------------------------------------------------------
+            # LEVEL 3: Preprocessing Chain (Fast 1D Ops)
+            # -------------------------------------------------------------
+            
+            # Always apply chain to the cached mean (Fast enough to do every time)
+            # Or we could cache this too, but it changes most often.
+            
+            mean_spec = self._cached_masked_mean
             processed = mean_spec[np.newaxis, :] # Make 2D (1, Bands) for functions
             
             for step in self.prep_chain:
@@ -206,8 +276,6 @@ class AnalysisViewModel(QObject):
                     processed = processing.apply_min_subtraction(processed)
                 elif name == "Center":
                     processed = processing.apply_mean_centering(processed)
-                
-                # Absorbance step removed from list logic
                 
                 processed = np.nan_to_num(processed)
                 
