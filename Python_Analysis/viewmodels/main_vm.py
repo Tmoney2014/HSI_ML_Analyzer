@@ -3,6 +3,76 @@ from typing import List, Optional
 import numpy as np
 import os
 from services.data_loader import load_hsi_data
+from collections import OrderedDict
+import threading
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+class SmartCache(OrderedDict):
+    def __init__(self, max_items=10, min_memory_gb=1.0, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_items = max_items
+        self.min_memory_gb = min_memory_gb
+        self.lock = threading.RLock()
+        
+    def __getitem__(self, key):
+        with self.lock:
+            value = super().__getitem__(key)
+            # Avoid re-ordering if we are in the middle of checking/evicting
+            if not getattr(self, '_evicting', False):
+                self.move_to_end(key) # Mark as recently used
+            return value
+        
+    def __setitem__(self, key, value):
+        with self.lock:
+            if key in self and not getattr(self, '_evicting', False):
+                self.move_to_end(key)
+            super().__setitem__(key, value)
+            self._check_limits()
+    
+    def __contains__(self, key):
+        with self.lock:
+            return super().__contains__(key)
+
+    def get(self, key, default=None):
+        with self.lock:
+            return super().get(key, default)
+        
+    def _check_limits(self):
+        # Prevent recursion or interference during eviction
+        if getattr(self, '_evicting', False):
+            return
+            
+        self._evicting = True
+        try:
+            # 1. Count Limit
+            while len(self) > self.max_items:
+                # print(f"[Cache] Count Limit Reached ({len(self)} > {self.max_items}). Evicting...")
+                self.popitem(last=False) # Remove oldest (FIFO)
+                
+            # 2. Memory Limit (Safety Guard)
+            if psutil:
+                try:
+                    mem = psutil.virtual_memory()
+                    available_gb = mem.available / (1024 ** 3)
+                    # If memory is critical, evict aggressively until safe or empty
+                    while available_gb < self.min_memory_gb and len(self) > 0:
+                        # print(f"[Cache] Low Memory ({available_gb:.2f}GB < {self.min_memory_gb}GB). Evicting...")
+                        self.popitem(last=False)
+                        mem = psutil.virtual_memory()
+                        available_gb = mem.available / (1024 ** 3)
+                except Exception as e:
+                    print(f"[Cache] Memory check failed: {e}")
+        finally:
+            self._evicting = False
+                
+    def set_config(self, max_items, min_memory_gb):
+        with self.lock:
+            self.max_items = max_items
+            self.min_memory_gb = min_memory_gb
+            self._check_limits()
 
 class MainViewModel(QObject):
     # Signals to notify Views of changes
@@ -23,7 +93,8 @@ class MainViewModel(QObject):
         self.processing_mode: str = "Raw" # Default
         
         # Cache for loaded cubes to avoid re-reading disk (path -> (cube, waves))
-        self.data_cache = {}
+        # Use SmartCache for LRU and Memory Protection
+        self.data_cache = SmartCache(max_items=20, min_memory_gb=1.0)
         
         # Reference Data Cache (Loaded Arrays)
         self.cache_white: Optional[np.ndarray] = None
@@ -31,6 +102,11 @@ class MainViewModel(QObject):
         
         # Project Management
         self.current_project_path: Optional[str] = None
+        
+    def set_cache_config(self, limit: int, min_mem_gb: float):
+        """Configure Smart Cache Limits"""
+        if isinstance(self.data_cache, SmartCache):
+            self.data_cache.set_config(limit, min_mem_gb)
 
     def reset_session(self):
         """Reset all data for New Project"""

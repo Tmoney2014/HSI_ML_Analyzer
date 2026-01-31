@@ -3,6 +3,7 @@ import numpy as np
 from viewmodels.main_vm import MainViewModel
 from models import processing
 from services.data_loader import load_hsi_data
+from services.processing_service import ProcessingService
 
 class AnalysisViewModel(QObject):
     visualization_updated = pyqtSignal(object, object) # (spec_data, waves)
@@ -247,39 +248,26 @@ class AnalysisViewModel(QObject):
             # LEVEL 3: Preprocessing Chain (Fast 1D Ops)
             # -------------------------------------------------------------
             
-            # Always apply chain to the cached mean (Fast enough to do every time)
-            # Or we could cache this too, but it changes most often.
-            
+            # Use ProcessingService for consistency
             mean_spec = self._cached_masked_mean
-            processed = mean_spec[np.newaxis, :] # Make 2D (1, Bands) for functions
             
-            for step in self.prep_chain:
-                name = step.get('name')
-                p = step.get('params', {})
-                
-                if name == "SG":
-                    processed = processing.apply_savgol(processed, 
-                                                        window_size=p.get('win', 5), 
-                                                        poly_order=p.get('poly', 2),
-                                                        deriv=p.get('deriv', 0))
-                elif name == "SimpleDeriv":
-                    processed = processing.apply_simple_derivative(processed, gap=p.get('gap', 5), order=p.get('order', 1), apply_ratio=p.get('ratio', False), ndi_threshold=p.get('ndi_threshold', 1e-4))
-                elif name == "SNV":
-                    processed = processing.apply_snv(processed)
-                elif name == "L2":
-                    processed = processing.apply_l2_norm(processed)
-                elif name == "3PointDepth":
-                    processed = processing.apply_rolling_3point_depth(processed, gap=p.get('gap', 5))
-                elif name == "MinMax":
-                    processed = processing.apply_minmax_norm(processed)
-                elif name == "MinSub":
-                    processed = processing.apply_min_subtraction(processed)
-                elif name == "Center":
-                    processed = processing.apply_mean_centering(processed)
-                
-                processed = np.nan_to_num(processed)
-                
-            return processed.flatten(), waves
+            # Prepare for service: (1, 1, B)
+            # We treat this mean spectrum as a "Raw Cube" for the service 
+            # because we only want to apply the Prep Chain (Ref/Masking already done)
+            dummy_cube = mean_spec.reshape(1, 1, -1)
+            
+            processed_cube, _ = ProcessingService.process_cube(
+                dummy_cube, 
+                mode="Raw",          # Don't re-convert
+                threshold=-999.0,    # Don't re-mask
+                mask_rules=None,
+                prep_chain=self.prep_chain
+            )
+            
+            # processed_cube is (1, B) (n_pixels=1 flattened)
+            processed = processed_cube.flatten()
+            
+            return processed, waves
             
         except Exception as e:
             self.error_occurred.emit(str(e))
