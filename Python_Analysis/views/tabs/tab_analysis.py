@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QGroupBox, 
-                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox, QDialog, QFormLayout, QSpinBox, QComboBox, QDialogButtonBox, QCheckBox)
+                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox)
 from PyQt5.QtCore import Qt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -13,92 +13,7 @@ from viewmodels.main_vm import MainViewModel
 from viewmodels.analysis_vm import AnalysisViewModel
 from views.components.custom_toolbar import CustomToolbar
 from views.components.image_viewer import ImageViewer
-
-class PreprocessingSettingsDialog(QDialog):
-    def __init__(self, method, params=None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Settings: {method}")
-        self.key = method # Store the key
-        self.params = params or {}
-        self.inputs = {}
-        
-        self.init_ui()
-        
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-        
-        self.inputs = {}
-        
-        if self.key == "SG":
-            self.add_spin(form, "Window Size", "win", 5, 3, 51, 2) # Odd numbers
-            self.add_spin(form, "Poly Order", "poly", 2, 1, 5)
-            self.add_spin(form, "Deriv Order", "deriv", 0, 0, 2)
-            
-        elif self.key == "SimpleDeriv":
-            self.add_spin(form, "Gap Size", "gap", 1, 1, 50)
-            
-            # Order ComboBox
-            cb_order = QComboBox()
-            cb_order.addItems(["1st Derivative", "2nd Derivative"])
-            current_order = self.params.get("order", 1)
-            cb_order.setCurrentIndex(current_order - 1)
-            form.addRow("Order:", cb_order)
-            self.inputs["order"] = cb_order
-            
-            # Application Ratio (NDI) Checkbox
-            from PyQt5.QtWidgets import QCheckBox
-            cb_ratio = QCheckBox("Use Normalized Ratio (NDI)")
-            cb_ratio.setToolTip("Formula: (A-B) / (A+B)\nGood for lighting invariant analysis.")
-            cb_ratio.setChecked(self.params.get("ratio", False))
-            form.addRow("", cb_ratio)
-            self.inputs["ratio"] = cb_ratio
-            
-            # NDI Threshold
-            txt_thresh = QLineEdit()
-            txt_thresh.setPlaceholderText("e.g. 1000.0")
-            txt_thresh.setText(str(self.params.get("ndi_threshold", 1000.0)))
-            form.addRow("NDI Threshold:", txt_thresh)
-            self.inputs["ndi_threshold"] = txt_thresh
-            
-        elif self.key == "3PointDepth":
-            self.add_spin(form, "Gap Size (Shoulder Distance)", "gap", 5, 1, 50)
-            
-        else:
-            layout.addWidget(QLabel("No configurable parameters for this method."))
-            
-        layout.addLayout(form)
-        
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
-        
-    def add_spin(self, layout, label, key, default, min_val, max_val, step=1):
-        spin = QSpinBox()
-        spin.setRange(min_val, max_val)
-        spin.setSingleStep(step)
-        spin.setValue(self.params.get(key, default))
-        layout.addRow(f"{label}:", spin)
-        self.inputs[key] = spin
-        
-    def get_params(self):
-        new_params = {}
-        for key, widget in self.inputs.items():
-            if isinstance(widget, QSpinBox):
-                new_params[key] = widget.value()
-            elif isinstance(widget, QComboBox):
-                if key == "order":
-                    new_params[key] = widget.currentIndex() + 1
-            elif isinstance(widget, QCheckBox): # Handle Checkbox
-                new_params[key] = widget.isChecked()
-            elif isinstance(widget, QLineEdit):
-                if key == "ndi_threshold":
-                    try:
-                        new_params[key] = float(widget.text())
-                    except:
-                        new_params[key] = 1000.0
-        return new_params
+from views.dialogs.preprocessing_dialog import PreprocessingSettingsDialog
 
 class TabAnalysis(QWidget):
     def __init__(self, main_vm: MainViewModel, analysis_vm: AnalysisViewModel):
@@ -348,35 +263,7 @@ class TabAnalysis(QWidget):
             
         item.setText(lbl)
 
-    def on_mode_changed(self, is_ref):
-        if is_ref:
-             self.slider_thresh.setRange(0, 1000)
-             self.slider_thresh.setValue(10) # 0.01
-             self.txt_thresh.setText("0.01")
-        else:
-             self.slider_thresh.setRange(0, 65535) # Safe max for both 12-bit and 16-bit
-             self.slider_thresh.setValue(100)
-             self.txt_thresh.setText("100")
-        self.update_params()
-
-    def on_slider_value_changed(self, val):
-        """Update text only for visual feedback during drag"""
-        try:
-            if self.analysis_vm.use_ref:
-                # 0-1000 -> 0.0-1.0
-                self.txt_thresh.setText(f"{val/1000.0:.3f}")
-            else:
-                self.txt_thresh.setText(str(val))
-        except Exception:
-            pass # Ignore errors during rapid drag
-
-    def on_slider_release(self):
-        """Update model/viz and Autosave on release"""
-        try:
-            val = self.slider_thresh.value()
-            self.update_params()
-        except Exception:
-            pass
+    # NOTE: on_mode_changed and on_slider_release are defined later (after refresh_file_list)
 
     def open_prep_settings(self, item):
         key = item.data(Qt.UserRole)
@@ -429,6 +316,17 @@ class TabAnalysis(QWidget):
              self.slider_thresh.setValue(100)
              self.txt_thresh.setText("100")
         self.update_params()
+
+    def on_slider_value_changed(self, val):
+        """Update text only for visual feedback during drag"""
+        try:
+            if self.analysis_vm.use_ref:
+                # 0-1000 -> 0.0-1.0
+                self.txt_thresh.setText(f"{val/1000.0:.3f}")
+            else:
+                self.txt_thresh.setText(str(val))
+        except Exception:
+            pass # Ignore errors during rapid drag
 
     def on_slider_release(self):
         val = self.slider_thresh.value()
