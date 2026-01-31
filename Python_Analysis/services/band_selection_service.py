@@ -54,12 +54,14 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None):
     else: # Default: SPA-like (using Projections or PCA Loadings)
         # Standard SPA Implementation
         # 1. Downsample if too large (for speed)
-        MAX_PIXELS = 3000
-        if X.shape[0] > MAX_PIXELS:
-            indices = np.random.choice(X.shape[0], MAX_PIXELS, replace=False)
-            X_spa = X[indices, :]
+        if X.shape[0] > 10000:
+             # Just a safety cap for VERY large data (e.g. >10k) to prevent freezing
+             # But use deterministic random
+             rng = np.random.RandomState(42)
+             indices = rng.choice(X.shape[0], 10000, replace=False)
+             X_spa = X[indices, :]
         else:
-            X_spa = X
+             X_spa = X
             
         n_proj = n_bands
         n_col = X_spa.shape[1]

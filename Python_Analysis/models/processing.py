@@ -144,27 +144,26 @@ def apply_simple_derivative(data, gap: int = 5, order: int = 1, apply_ratio: boo
         # A = data[:, :-gap] (Index 0 ~ N-Gap)
         # B = data[:, gap:]  (Index Gap ~ N)
         
-        A = diff_data[:, :-gap]
-        B = diff_data[:, gap:]
-        
-        if apply_ratio:
-            # NDI Formula: (A - B) / (A + B)
-            numerator = A - B
-            denominator = A + B
+        # Correct Logic: Band[i+gap] - Band[i] (Right - Left)
+        # This matches standard derivative definition (Delta y)
+        if diff_data.shape[1] > gap:
+            A = diff_data[:, :-gap] # Left (Current)
+            B = diff_data[:, gap:]  # Right (Future)
             
-            # Stabilization: If signal is too weak, result is 0
-            # Avoid division by zero and singularity
-            mask_valid = denominator > ndi_threshold
-            
-            # Initialize with 0
-            diff_slice = np.zeros_like(numerator)
-            
-            # Compute only where valid
-            diff_slice[mask_valid] = numerator[mask_valid] / (denominator[mask_valid] + epsilon)
-            
-            diff_data = diff_slice
-        else:
-            diff_data = A - B
+            if apply_ratio:
+                # NDI Formula: (B - A) / (B + A)
+                # Note: NDI is typically (NIR - RED) / (NIR + RED)
+                # Here we strictly follow (Target - Base) / (Target + Base)
+                numerator = B - A
+                denominator = B + A
+                
+                mask_valid = denominator > ndi_threshold
+                diff_slice = np.zeros_like(numerator)
+                diff_slice[mask_valid] = numerator[mask_valid] / (denominator[mask_valid] + epsilon)
+                diff_data = diff_slice
+            else:
+                # Standard Derivative: B - A
+                diff_data = B - A
         
     return diff_data
 

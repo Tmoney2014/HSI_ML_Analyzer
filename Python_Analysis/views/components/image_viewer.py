@@ -9,6 +9,7 @@ import matplotlib.gridspec as gridspec
 from views.components.custom_toolbar import CustomToolbar
 from services.data_loader import load_hsi_data
 from models import processing
+from services.processing_service import ProcessingService
 
 class ImageViewer(QWidget):
     def __init__(self, path, analysis_vm, parent=None):
@@ -182,29 +183,20 @@ class ImageViewer(QWidget):
             raw_spec = self.processed_cube[y, x, :].astype(float)
             processed_spec = raw_spec[np.newaxis, :] # (1, B)
             
-            # Apply Chain locally using processing module
-            for step in self.vm.prep_chain:
-                name = step.get('name')
-                p = step.get('params', {})
-                if name == "SG":
-                    processed_spec = processing.apply_savgol(processed_spec, p.get('win'), p.get('poly'), p.get('deriv', 0))
-                elif name == "SimpleDeriv":
-                    processed_spec = processing.apply_simple_derivative(processed_spec, gap=p.get('gap', 5), order=p.get('order', 1), apply_ratio=p.get('ratio', False), ndi_threshold=p.get('ndi_threshold', 1e-4))
-                elif name == "SNV":
-                    processed_spec = processing.apply_snv(processed_spec)
-                elif name == "3PointDepth":
-                    processed_spec = processing.apply_rolling_3point_depth(processed_spec, gap=p.get('gap', 5))
-                elif name == "L2":
-                    processed_spec = processing.apply_l2_norm(processed_spec)
-                elif name == "MinSub":
-                    processed_spec = processing.apply_min_subtraction(processed_spec)
-                elif name == "MinMax":
-                    processed_spec = processing.apply_minmax_norm(processed_spec)
-                elif name == "Center":
-                    processed_spec = processing.apply_mean_centering(processed_spec)
-                processed_spec = np.nan_to_num(processed_spec)
-
-            spec_1d = processed_spec.flatten()
+            # Use ProcessingService for consistency
+            # Single Pixel (1, B) -> Reshape to (1, 1, B) for service
+            dummy_cube = raw_spec.reshape(1, 1, -1)
+            
+            processed_cube, _ = ProcessingService.process_cube(
+                dummy_cube,
+                mode="Raw",       # Already converted/managed by update_view
+                threshold=-999.0, # Disable masking
+                mask_rules=None,
+                prep_chain=self.vm.prep_chain
+            )
+            
+            # Result: (1, New_Bands)
+            spec_1d = processed_cube.flatten()
             x_axis = self.waves if self.waves else range(len(spec_1d))
             
             # Fix: Gap Difference reduces band count, causing shape mismatch

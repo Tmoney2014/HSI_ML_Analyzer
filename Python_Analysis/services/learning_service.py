@@ -8,6 +8,8 @@ from sklearn.cross_decomposition import PLSRegression
 from sklearn.preprocessing import OneHotEncoder
 
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+import matplotlib.pyplot as plt
+import seaborn as sns # Optional, for nicer plots if installed
 
 class LearningService:
     def train_model(self, X, y, model_type="Linear SVM", test_ratio=0.2):
@@ -152,7 +154,7 @@ class LearningService:
 
     # ----------------------------------------
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None, mean_spectrum=None, spa_scores=None):
         """
         Export model to JSON for C#.
         Handles SVM, PLS-DA, and LDA (Linear Only).
@@ -253,3 +255,122 @@ class LearningService:
             json.dump(export_data, f, indent=4, ensure_ascii=False)
             
         print(f"   [LearningService] Model exported to {output_path}")
+        
+        # Generate Feature Importance Plot
+        self._generate_importance_plot(weights, selected_bands, output_path, label_map, mean_spectrum, spa_scores, exclude_rules)
+
+    def _generate_importance_plot(self, weights, bands, output_path, label_map, mean_spectrum=None, spa_scores=None, exclude_rules=None):
+        try:
+            # Switch to non-interactive backend for thread safety
+            plt.switch_backend('Agg')
+            
+            if sns: sns.reset_orig()
+            plt.style.use('default') 
+            
+            fig, ax1 = plt.subplots(figsize=(12, 6))
+            
+            # --- 1. Background: Excluded Regions (Shading) ---
+            # Do this first so it's behind everything
+            if exclude_rules:
+                import matplotlib.patches as mpatches
+                try:
+                    for part in exclude_rules.split(','):
+                        part = part.strip()
+                        if not part: continue
+                        if '-' in part:
+                            start, end = map(int, part.split('-'))
+                            # UI 1-based -> Plot 0-based
+                            ax1.axvspan(start-1, end, color='#E0E0E0', alpha=0.5, zorder=0)
+                        else:
+                            idx = int(part) - 1
+                            ax1.axvspan(idx-0.5, idx+0.5, color='#E0E0E0', alpha=0.5, zorder=0)
+                    
+                    # Add dummy handle for legend
+                    # We can't easily get handle from axvspan unless saved, so create a Patch
+                    # exp_patch = mpatches.Patch(color='#E0E0E0', label='Excluded Region')
+                except:
+                    pass
+
+            # --- 2. Background: Mean Spectrum (Right Axis) ---
+            spec_line = None
+            if mean_spectrum is not None:
+                ax2 = ax1.twinx()
+                spec_line, = ax2.plot(range(len(mean_spectrum)), mean_spectrum, color='gray', linestyle='--', linewidth=1.5, label='Mean Spectrum', alpha=0.8, zorder=1)
+                ax2.set_ylabel("Intensity (DN/Ref)", color='gray', fontsize=10)
+                ax2.tick_params(axis='y', labelcolor='gray')
+            else:
+                ax2 = None
+                
+            # --- 3. Foreground: SPA Scores (Left Axis - Blue/Red Bars) ---
+            
+            ax1.set_xlabel("Band Index")
+            ax1.set_ylabel("Selectivity Score (SPA)", color='blue', fontsize=10)
+            ax1.tick_params(axis='y', labelcolor='blue')
+            
+            bar_candidates = None
+            bar_selected = None
+            
+            if spa_scores is not None and len(spa_scores) > 0:
+                x_all = np.arange(len(spa_scores))
+                bar_candidates = ax1.bar(x_all, spa_scores, color='skyblue', width=0.8, alpha=0.6, label='Candidate Bands', zorder=2)
+                
+                sel_scores = []
+                for b in bands:
+                    if b < len(spa_scores): sel_scores.append(spa_scores[int(b)])
+                    else: sel_scores.append(0)
+                        
+                bar_selected = ax1.bar(bands, sel_scores, color='red', width=0.8, alpha=1.0, label='Selected Bands', zorder=3)
+                
+                # Labels
+                for b, s in zip(bands, sel_scores):
+                    ax1.text(b, s, str(int(b)), ha='center', va='bottom', fontsize=9, fontweight='bold', color='red', zorder=4)
+                    
+            else:
+                # Fallback style
+                w = np.abs(np.array(weights))
+                if w.ndim == 2: w = np.max(w, axis=0) 
+                bar_selected = ax1.bar(bands, w, color='red', width=1.5, label='Importance (Coef)')
+            
+            plt.title(f"Band Selection Result (SPA Algorithm, Top-{len(bands)})", fontsize=12)
+            plt.grid(True, axis='x', alpha=0.3)
+            
+            # --- Consolidated Legend ---
+            handles = []
+            labels = []
+            
+            if exclude_rules:
+                import matplotlib.patches as mpatches
+                handles.append(mpatches.Patch(color='#E0E0E0', label='Excluded Region'))
+            
+            if bar_selected: handles.append(bar_selected)
+            if bar_candidates: handles.append(bar_candidates)
+            if spec_line: handles.append(spec_line)
+            
+            # Extract labels manually or use helper
+            # Since we manually added items, just use their labels if object has one, OR construct
+            # Actually bar containers have labels.
+            
+            final_handles = []
+            final_labels = []
+            for h in handles:
+                if hasattr(h, 'get_label'): 
+                    final_labels.append(h.get_label())
+                    final_handles.append(h)
+                else: 
+                    # If it's a Patch
+                    final_labels.append(h.get_label())
+                    final_handles.append(h)
+
+            plt.legend(handles=final_handles, labels=final_labels, loc='upper left')
+            
+            plt.tight_layout()
+            
+            png_path = os.path.join(os.path.dirname(output_path), "band_importance.png")
+            plt.savefig(png_path, dpi=150)
+            plt.close()
+            print(f"   [LearningService] Importance plot saved to {png_path}")
+            
+        except Exception as e:
+            print(f"   [Error] Failed to generate plot: {e}")
+            import traceback
+            traceback.print_exc()
