@@ -27,193 +27,166 @@ class OptimizationService(QObject):
         Returns:
             dict: Best parameters found.
         """
-        # Deep copy to protect initial state
         best_params = copy.deepcopy(initial_params)
-        
         current_acc = trial_callback(best_params)
         self.log_message.emit(f"Baseline Accuracy: {current_acc:.2f}%")
         
-        history = [] # List of (params, acc)
-        history.append((best_params.copy(), current_acc))
-        
-        # 1. Optimize Gap Size (If applicable)
-        # Check active preprocessing for 'SimpleDeriv' or '3PointDepth'
-        prep_chain = best_params.get('prep', [])
+        history = [(best_params.copy(), current_acc)]
         target_keys = ["SimpleDeriv", "3PointDepth"]
+        
+        # Phase 1: Gap Size
+        best_params, current_acc, target_prep = self._optimize_gap(
+            best_params, current_acc, history, trial_callback, target_keys
+        )
+        
+        # Phase 2: NDI Threshold
+        best_params, current_acc, ndi_step = self._optimize_ndi(
+            best_params, current_acc, history, trial_callback
+        )
+        
+        # Phase 3: Band Count
+        best_params, current_acc = self._optimize_bands(
+            best_params, current_acc, history, trial_callback
+        )
+        
+        # Generate Report
+        self._generate_report(initial_params, best_params, current_acc, history, target_keys, target_prep, ndi_step)
+        
+        return best_params, history
+    
+    def _optimize_gap(self, best_params, current_acc, history, trial_callback, target_keys):
+        """Phase 1: Optimize Gap Size for SimpleDeriv or 3PointDepth."""
+        prep_chain = best_params.get('prep', [])
         target_prep = None
         for step in prep_chain:
             if step['name'] in target_keys:
                 target_prep = step
                 break
                 
-        if target_prep:
-            self.log_message.emit(f"\n[Phase 1] optimizing Gap Size for {target_prep['name']}...")
-            start_gap = target_prep['params'].get('gap', 1)
-            self.log_message.emit(f"   Start Gap: {start_gap}")
+        if not target_prep:
+            return best_params, current_acc, None
             
-            # Define Tuner Callback for Gap
-            def gap_evaluator(val):
-                # CRITICAL Fix: Deep Copy to avoid polluting best_params
-                p = copy.deepcopy(best_params)
-                # Find the step and update
-                for s in p['prep']:
-                    if s['name'] == target_prep['name']:
-                        s['params']['gap'] = val
-                return trial_callback(p), p
+        self.log_message.emit(f"\n[Phase 1] Optimizing Gap Size for {target_prep['name']}...")
+        start_gap = target_prep['params'].get('gap', 1)
+        self.log_message.emit(f"   Start Gap: {start_gap}")
+        
+        def gap_evaluator(val):
+            p = copy.deepcopy(best_params)
+            for s in p['prep']:
+                if s['name'] == target_prep['name']:
+                    s['params']['gap'] = val
+            acc = trial_callback(p)
+            history.append((copy.deepcopy(p), acc))
+            return acc, p
 
-            best_gap, gap_acc, best_p_gap = self.lookahead_hill_climbing(
-                start_val=start_gap, 
-                step=2, 
-                lookahead=3, 
-                max_val=50, 
-                evaluator=gap_evaluator,
-                initial_acc=current_acc,
-                initial_params_obj=best_params
-            )
-            
-            if gap_acc > current_acc:
-                self.log_message.emit(f" -> Found Better Gap: {start_gap} -> {best_gap} (+{gap_acc - current_acc:.2f}%)")
-                # Update Best Params to carry over to next phase
-                best_params = best_p_gap
-                current_acc = gap_acc
-                history.append((best_params.copy(), current_acc))
-            else:
-                self.log_message.emit(" -> No improvement on Gap.")
-
-        # 2. Optimize NDI Threshold (If applicable)
-        # Check if 'ratio' is True in SimpleDeriv
+        best_gap, gap_acc, best_p_gap = self.lookahead_hill_climbing(
+            start_val=start_gap, step=2, lookahead=3, max_val=50, 
+            evaluator=gap_evaluator, initial_acc=current_acc, initial_params_obj=best_params
+        )
+        
+        if gap_acc > current_acc:
+            self.log_message.emit(f" -> Found Better Gap: {start_gap} -> {best_gap} (+{gap_acc - current_acc:.2f}%)")
+            return best_p_gap, gap_acc, target_prep
+        else:
+            self.log_message.emit(" -> No improvement on Gap.")
+            return best_params, current_acc, target_prep
+    
+    def _optimize_ndi(self, best_params, current_acc, history, trial_callback):
+        """Phase 2: Optimize NDI Threshold if applicable."""
         ndi_step = None
         for step in best_params.get('prep', []):
             if step['name'] == "SimpleDeriv" and step['params'].get('ratio', False):
                 ndi_step = step
                 break
         
-        if ndi_step:
-            self.log_message.emit(f"\n[Phase 2] Optimizing NDI Threshold...")
-            start_th = ndi_step['params'].get('ndi_threshold', 1000.0)
-            if start_th < 1: start_th = 50 # Force start reasonable
-            self.log_message.emit(f"   Start Threshold: {start_th}")
+        if not ndi_step:
+            return best_params, current_acc, None
             
-            def ndi_evaluator(val):
-                # CRITICAL Fix: Deep Copy
-                p = copy.deepcopy(best_params)
-                for s in p['prep']:
-                    if s['name'] == "SimpleDeriv":
-                        s['params']['ndi_threshold'] = val
-                return trial_callback(p), p
+        self.log_message.emit(f"\n[Phase 2] Optimizing NDI Threshold...")
+        start_th = ndi_step['params'].get('ndi_threshold', 1000.0)
+        if start_th < 1: start_th = 50
+        self.log_message.emit(f"   Start Threshold: {start_th}")
+        
+        def ndi_evaluator(val):
+            p = copy.deepcopy(best_params)
+            for s in p['prep']:
+                if s['name'] == "SimpleDeriv":
+                    s['params']['ndi_threshold'] = val
+            acc = trial_callback(p)
+            history.append((copy.deepcopy(p), acc))
+            return acc, p
 
-            best_th, th_acc, best_p_th = self.lookahead_hill_climbing(
-                start_val=start_th,
-                step=100,
-                lookahead=3,
-                max_val=2000,
-                evaluator=ndi_evaluator,
-                initial_acc=current_acc,
-                initial_params_obj=best_params
-            )
-            
-            if th_acc > current_acc:
-                # Update Best Params to carry over to next phase
-                self.log_message.emit(f" -> Found Better Threshold: {start_th} -> {best_th} (+{th_acc - current_acc:.2f}%)")
-                best_params = best_p_th
-                current_acc = th_acc
-                history.append((best_params.copy(), current_acc))
-            else:
-                self.log_message.emit(" -> No improvement on Threshold.")
-                
-        # 3. Optimize Band Count
+        best_th, th_acc, best_p_th = self.lookahead_hill_climbing(
+            start_val=start_th, step=100, lookahead=3, max_val=2000,
+            evaluator=ndi_evaluator, initial_acc=current_acc, initial_params_obj=best_params
+        )
+        
+        if th_acc > current_acc:
+            self.log_message.emit(f" -> Found Better Threshold: {start_th} -> {best_th} (+{th_acc - current_acc:.2f}%)")
+            return best_p_th, th_acc, ndi_step
+        else:
+            self.log_message.emit(" -> No improvement on Threshold.")
+            return best_params, current_acc, ndi_step
+    
+    def _optimize_bands(self, best_params, current_acc, history, trial_callback):
+        """Phase 3: Optimize Feature Count (Band Selection)."""
         self.log_message.emit(f"\n[Phase 3] Optimizing Feature Count (Bands)...")
         start_features = best_params.get('n_features', 5)
         self.log_message.emit(f"   Start Features: {start_features}")
         
         def band_evaluator(val):
-            # CRITICAL Fix: Deep Copy
             p = copy.deepcopy(best_params)
             p['n_features'] = val
-            return trial_callback(p), p
+            acc = trial_callback(p)
+            history.append((copy.deepcopy(p), acc))
+            return acc, p
             
         best_bands, band_acc, best_p_band = self.lookahead_hill_climbing(
-            start_val=start_features,
-            step=5,
-            lookahead=3,
-            max_val=40,
-            evaluator=band_evaluator,
-            initial_acc=current_acc,
-            initial_params_obj=best_params
+            start_val=start_features, step=5, lookahead=3, max_val=40,
+            evaluator=band_evaluator, initial_acc=current_acc, initial_params_obj=best_params
         )
         
         if band_acc > current_acc:
             self.log_message.emit(f" -> Found Better Band Count: {start_features} -> {best_bands} (+{band_acc - current_acc:.2f}%)")
-            best_params = best_p_band
-            current_acc = band_acc
-            history.append((best_params.copy(), current_acc))
-        # Generate Final Report
-        report = []
-        report.append("\n🎉 Optimization Completed!")
-        report.append("-" * 40)
-        report.append(f"[Change Log]")
+            return best_p_band, band_acc
+        return best_params, current_acc
+    
+    def _generate_report(self, initial_params, best_params, current_acc, history, target_keys, target_prep, ndi_step):
+        """Generate final optimization report."""
+        report = ["\n🎉 Optimization Completed!", "-" * 40, "[Change Log]"]
         
         # 1. Gap
         if target_prep:
-            initial = initial_params['prep'][0]['params'].get('gap', 5) # Assuming first is target or find again
-            # Find initial gap properly
-            init_gap = 5
-            for s in initial_params['prep']:
-                if s['name'] in target_keys: init_gap = s['params'].get('gap', 5)
-            
-            final_gap = 5
-            for s in best_params['prep']:
-                if s['name'] in target_keys: final_gap = s['params'].get('gap', 5)
-                
-            if init_gap != final_gap:
-                report.append(f"1. Gap Size: {init_gap} -> {final_gap}")
-            else:
-                report.append(f"1. Gap Size: {init_gap} (No Change)")
+            init_gap = next((s['params'].get('gap', 5) for s in initial_params['prep'] if s['name'] in target_keys), 5)
+            final_gap = next((s['params'].get('gap', 5) for s in best_params['prep'] if s['name'] in target_keys), 5)
+            change = f"{init_gap} -> {final_gap}" if init_gap != final_gap else f"{init_gap} (No Change)"
+            report.append(f"1. Gap Size: {change}")
 
         # 2. Threshold
         if ndi_step:
-            init_th = 0
-            for s in initial_params['prep']:
-                if s['name'] == "SimpleDeriv": init_th = s['params'].get('ndi_threshold', 0)
-                
-            final_th = 0
-            for s in best_params['prep']:
-                if s['name'] == "SimpleDeriv": final_th = s['params'].get('ndi_threshold', 0)
-                
-            if init_th != final_th:
-                report.append(f"2. NDI Threshold: {init_th} -> {final_th}")
-            else:
-                 report.append(f"2. NDI Threshold: {init_th} (No Change)")
+            init_th = next((s['params'].get('ndi_threshold', 0) for s in initial_params['prep'] if s['name'] == "SimpleDeriv"), 0)
+            final_th = next((s['params'].get('ndi_threshold', 0) for s in best_params['prep'] if s['name'] == "SimpleDeriv"), 0)
+            change = f"{init_th} -> {final_th}" if init_th != final_th else f"{init_th} (No Change)"
+            report.append(f"2. NDI Threshold: {change}")
                  
         # 3. Bands
         init_bands = initial_params.get('n_features', 5)
         final_bands = best_params.get('n_features', 5)
-        if init_bands != final_bands:
-             report.append(f"3. Band Count: {init_bands} -> {final_bands}")
-        else:
-             report.append(f"3. Band Count: {init_bands} (No Change)")
+        change = f"{init_bands} -> {final_bands}" if init_bands != final_bands else f"{init_bands} (No Change)"
+        report.append(f"3. Band Count: {change}")
              
-        report.append("-" * 40)
-        report.append("-" * 40)
-        report.append(f"🏆 Final Best Accuracy: {current_acc:.2f}%")
-        report.append("-" * 40)
-        report.append(f"📜 Top 3 Configurations")
+        report.extend(["-" * 40, f"🏆 Final Best Accuracy: {current_acc:.2f}%", "-" * 40, "📜 Top 3 Configurations"])
         
-        # Sort history by accuracy descending
         sorted_history = sorted(history, key=lambda x: x[1], reverse=True)[:3]
         for i, (p, acc) in enumerate(sorted_history):
-            # Extract key info for concise log
-            info = []
-            info.append(f"Bands={p['n_features']}")
+            info = [f"Bands={p['n_features']}"]
             for s in p['prep']:
                 if s['name'] in target_keys: info.append(f"Gap={s['params'].get('gap')}")
                 if s['name'] == "SimpleDeriv" and s['params'].get('ratio'): info.append(f"Th={s['params'].get('ndi_threshold')}")
-            
-            medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
+            medal = ["🥇", "🥈", "🥉"][i]
             report.append(f"{medal} #{i+1}: {acc:.2f}% | {', '.join(info)}")
 
         self.log_message.emit("\n".join(report))
-        return best_params, history
 
     def lookahead_hill_climbing(self, start_val, step, lookahead, max_val, evaluator, initial_acc=None, initial_params_obj=None):
         """
