@@ -108,6 +108,30 @@ class MainViewModel(QObject):
         if isinstance(self.data_cache, SmartCache):
             self.data_cache.set_config(limit, min_mem_gb)
 
+    def ensure_refs_loaded(self):
+        """
+        /// <ai>AI가 작성함</ai>
+        Lazy Load Reference Data if not already cached.
+        Centralized method to avoid duplication across ViewModels.
+        """
+        # White Ref
+        if self.cache_white is None and self.white_ref:
+            try:
+                w_data, _ = load_hsi_data(self.white_ref)
+                if w_data is not None:
+                    self.cache_white = np.nanmean(w_data.reshape(-1, w_data.shape[-1]), axis=0)
+            except Exception as e:
+                print(f"[MainVM] Error loading White Ref: {e}")
+        
+        # Dark Ref
+        if self.cache_dark is None and self.dark_ref:
+            try:
+                d_data, _ = load_hsi_data(self.dark_ref)
+                if d_data is not None:
+                    self.cache_dark = np.nanmean(d_data.reshape(-1, d_data.shape[-1]), axis=0)
+            except Exception as e:
+                print(f"[MainVM] Error loading Dark Ref: {e}")
+
     def reset_session(self):
         """Reset all data for New Project"""
         self.file_groups.clear()
@@ -194,7 +218,11 @@ class MainViewModel(QObject):
             self.files_changed.emit()
 
     def remove_files_from_group(self, group_name: str, paths: List[str]):
+        # AI가 수정함: 파일 제거 시 캐시도 함께 정리
         if group_name in self.file_groups:
+            for p in paths:
+                if p in self.data_cache:
+                    del self.data_cache[p]
             self.file_groups[group_name] = [f for f in self.file_groups[group_name] if f not in paths]
             self.files_changed.emit()
 

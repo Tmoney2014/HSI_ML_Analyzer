@@ -46,6 +46,30 @@ class ProcessingService:
         return flat_data, mask
 
     @staticmethod
+    def convert_to_ref(cube, white_ref, dark_ref=None):
+        """
+        /// <ai>AI가 작성함</ai>
+        Convert Raw Cube to Reflectance.
+        Formula: R = (Sample - Dark) / (White - Dark)
+        
+        Args:
+            cube: Raw HSI Cube (H, W, B) or flattened (N, B)
+            white_ref: White reference vector (Bands,)
+            dark_ref: Dark reference vector (Bands,), optional
+        
+        Returns:
+            ref_cube: Reflectance values clipped to [0, 1]
+        """
+        if white_ref is None:
+            return cube
+        
+        d = dark_ref if dark_ref is not None else np.zeros_like(white_ref)
+        denom = (white_ref - d).astype(np.float32)
+        denom[denom == 0] = 1e-6
+        
+        return np.clip((cube.astype(np.float32) - d) / denom, 0.0, 1.0)
+
+    @staticmethod
     def get_base_data(cube, mode, threshold, mask_rules, white_ref=None, dark_ref=None):
         """
         Generates Base Data (Masked valid pixels, Ref/Abs converted, but NO Preprocessing).
@@ -54,18 +78,11 @@ class ProcessingService:
         cube = np.nan_to_num(cube)
         
         # 2. Convert to Reflectance / Absorbance
+        # AI가 수정함: convert_to_ref 메서드로 통합
         data_cube = cube
         
         if mode in ["Reflectance", "Absorbance"]:
-            if white_ref is not None and dark_ref is not None:
-                denom = np.subtract(white_ref, dark_ref, dtype=np.float32)
-                denom[denom == 0] = 1e-6 
-                num = np.subtract(cube, dark_ref, dtype=np.float32)
-                data_cube = np.divide(num, denom, dtype=np.float32)
-            elif white_ref is not None:
-                 denom = white_ref.astype(np.float32)
-                 denom[denom == 0] = 1e-6
-                 data_cube = cube.astype(np.float32) / denom
+            data_cube = ProcessingService.convert_to_ref(cube, white_ref, dark_ref)
         
         # Standardize Absorbance Logic
         if mode == "Absorbance":
