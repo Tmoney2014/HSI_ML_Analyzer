@@ -274,54 +274,17 @@ class AnalysisViewModel(QObject):
             return None, None
 
     def _convert_to_ref(self, raw_cube):
-        # 1. Lazy Load White Ref
-        if self.main_vm.cache_white is None and self.main_vm.white_ref:
-            try:
-                print(f"[DEBUG] Lazy Loading White Ref: {self.main_vm.white_ref}")
-                w_data, _ = load_hsi_data(self.main_vm.white_ref)
-                if w_data is None:
-                    print("[DEBUG] White Ref Load Failed (None)")
-                else:
-                    print(f"[DEBUG] White Ref Data Shape: {w_data.shape}")
-                    # Average to 1D pattern (mean of spatial pixels)
-                    # Assumes w_data is (H, W, Bands) or (N, Bands)
-                    # We need a 1D vector (Bands,)
-                    w_vec = np.nanmean(w_data.reshape(-1, w_data.shape[-1]), axis=0)
-                    self.main_vm.cache_white = w_vec
-                    print(f"[DEBUG] Cache White Set. Vector Shape: {w_vec.shape}")
-            except Exception as e:
-                print(f"[ERROR] Error loading White Ref: {e}")
-                
-        # 2. Lazy Load Dark Ref
-        if self.main_vm.cache_dark is None and self.main_vm.dark_ref:
-            try:
-                print(f"[DEBUG] Lazy Loading Dark Ref: {self.main_vm.dark_ref}")
-                d_data, _ = load_hsi_data(self.main_vm.dark_ref)
-                d_vec = np.nanmean(d_data.reshape(-1, d_data.shape[-1]), axis=0)
-                self.main_vm.cache_dark = d_vec
-                print(f"[DEBUG] Cache Dark Set.")
-            except Exception as e:
-                print(f"[ERROR] Error loading Dark Ref: {e}")
+        """
+        /// AI가 수정함: 중복 로직 제거, 중앙화된 메서드로 위임
+        Convert Raw Cube to Reflectance using centralized methods.
+        """
+        # 1. Ensure refs are loaded (centralized in MainViewModel)
+        self.main_vm.ensure_refs_loaded()
+        
+        # 2. Convert using ProcessingService
+        return ProcessingService.convert_to_ref(
+            raw_cube, 
+            self.main_vm.cache_white, 
+            self.main_vm.cache_dark
+        )
 
-        # 3. Apply
-        w_vec = self.main_vm.cache_white
-        d_vec = self.main_vm.cache_dark
-        
-        if w_vec is None: 
-            # print("[DEBUG] White Ref is None, returning Raw") # Too noisy for loop
-            return raw_cube
-        
-        d = d_vec if d_vec is not None else np.zeros_like(w_vec)
-        
-        # Check shapes
-        if raw_cube.shape[-1] != w_vec.shape[0]:
-            print(f"[ERROR] Band Mismatch: Cube {raw_cube.shape} vs White {w_vec.shape}")
-            return raw_cube
-
-        numerator = raw_cube - d
-        denominator = w_vec - d
-        
-        # Avoid div by zero
-        denominator[denominator == 0] = 1e-6
-        
-        return np.clip(numerator / denominator, 0.0, 1.0)

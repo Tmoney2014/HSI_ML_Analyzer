@@ -60,30 +60,12 @@ class TrainingViewModel(QObject):
             self.last_train_config_hash = None
 
     def _ensure_ref_loaded(self):
-        """Lazy Load Reference Data if not already cached."""
-        from services.data_loader import load_hsi_data
-        
-        # White Ref
-        if self.main_vm.cache_white is None and self.main_vm.white_ref:
-            try:
-                self.log_message.emit(f"Loading White Reference...")
-                w_data, _ = load_hsi_data(self.main_vm.white_ref)
-                if w_data is not None:
-                    w_vec = np.nanmean(w_data.reshape(-1, w_data.shape[-1]), axis=0)
-                    self.main_vm.cache_white = w_vec
-            except Exception as e:
-                self.log_message.emit(f"Warning: Failed to load White Ref: {e}")
-                
-        # Dark Ref
-        if self.main_vm.cache_dark is None and self.main_vm.dark_ref:
-            try:
-                self.log_message.emit(f"Loading Dark Reference...")
-                d_data, _ = load_hsi_data(self.main_vm.dark_ref)
-                if d_data is not None:
-                    d_vec = np.nanmean(d_data.reshape(-1, d_data.shape[-1]), axis=0)
-                    self.main_vm.cache_dark = d_vec
-            except Exception as e:
-                self.log_message.emit(f"Warning: Failed to load Dark Ref: {e}")
+        """
+        /// AI가 수정함: 중앙화된 메서드로 위임
+        Lazy Load Reference Data if not already cached.
+        """
+        self.main_vm.ensure_refs_loaded()
+
 
     def _compute_config_hash(self, vm_state):
         """
