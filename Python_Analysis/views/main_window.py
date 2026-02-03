@@ -18,6 +18,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("HSI Professional Analyzer v3.1 (Project Based)")
         self.setGeometry(50, 50, 1600, 1000)
         
+        # AI가 수정함: 프로젝트 활성 상태 플래그 (초기 자동저장 방지)
+        self.is_project_active = False
+        
         # 1. Initialize View Models
         self.main_vm = MainViewModel()
         self.analysis_vm = AnalysisViewModel(self.main_vm)
@@ -81,9 +84,14 @@ class MainWindow(QMainWindow):
             # Let's just return. The user can use Menu > New later.
             return
 
+        # AI가 수정함: 초기화 중 자동 저장 방지
+        self.is_project_active = False
         self.main_vm.reset_session()
         self.main_vm.current_project_path = f
         self._do_save(f)
+        
+        # AI가 수정함: 프로젝트 활성화
+        self.is_project_active = True
         
         self.setWindowTitle(f"HSI Professional Analyzer - {os.path.basename(f)}")
         self.status_bar.showMessage(f"New project created: {f}")
@@ -138,11 +146,16 @@ class MainWindow(QMainWindow):
             if not f:
                 return # User cancelled file creation
             
+            # AI가 수정함: 초기화 중 자동 저장 방지
+            self.is_project_active = False
             self.main_vm.reset_session()
             
             # Set path and perform initial save
             self.main_vm.current_project_path = f
             self._do_save(f)
+            
+            # AI가 수정함: 프로젝트 활성화
+            self.is_project_active = True
             
             self.setWindowTitle(f"HSI Professional Analyzer - {os.path.basename(f)}")
             self.status_bar.showMessage(f"New project created: {f}")
@@ -169,9 +182,18 @@ class MainWindow(QMainWindow):
 
     def auto_save_slot(self):
         """Called automatically when data changes."""
+        # AI가 수정함: 프로젝트가 활성화되지 않았으면 자동 저장 안 함
+        if not self.is_project_active:
+            return
+
         if self.main_vm.current_project_path:
             self._do_save(self.main_vm.current_project_path)
             # self.status_bar.showMessage("Auto-saved.", 1000) # Optional feedback
+        else:
+            # AI가 수정함: 경로가 없으면(새 프로젝트/로드실패 등) 사용자에게 저장 유도
+            # 주의: 너무 빈번하게 뜨지 않도록 주의해야 함. 
+            # 하지만 사용자 요청에 따라 바로 실행.
+            self.save_project_as()
 
     def _do_save(self, path):
         cfg = {
@@ -196,6 +218,12 @@ class MainWindow(QMainWindow):
 
     def load_project_file(self, path):
         if not os.path.exists(path): return
+        
+        # AI가 수정함: 프로젝트 로드 시 기존 세션 초기화 및 경로 안전 처리
+        self.is_project_active = False  # <--- 로드 중 자동 저장 방지 (중요)
+        self.main_vm.reset_session()
+        self.main_vm.current_project_path = None # 로드 중 에러 발생 시 잘못된 경로 유지 방지
+        
         try:
             with open(path, "r") as f:
                 cfg = json.load(f)
@@ -258,6 +286,9 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Project loaded: {path}")
             
             self.main_vm.files_changed.emit() # Force refresh
+            
+            # AI가 수정함: 로드 성공 시 프로젝트 활성화
+            self.is_project_active = True
             
         except Exception as e:
             QMessageBox.warning(self, "Load Error", f"Failed to load project:\n{e}")
