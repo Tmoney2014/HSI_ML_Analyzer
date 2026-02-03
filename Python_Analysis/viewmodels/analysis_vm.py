@@ -29,8 +29,10 @@ class AnalysisViewModel(QObject):
         self._full_state = []
         
         # --- Caching State ---
+        # AI가 수정함: Raw Cube를 별도로 캐시하여 마스킹 기준 유지
         self._cached_file_path = None
-        self._cached_ref_cube = None # (H, W, B) after Ref convert (expensive)
+        self._cached_raw_cube = None   # (H, W, B) Raw Cube (마스킹용)
+        self._cached_ref_cube = None   # (H, W, B) 시각화용 (Ref/Abs 변환 후)
         self._cached_mask_params = None # (threshold, mask_rules)
         self._cached_masked_mean = None # (B,) Mean Spectrum BEFORE Preprocessing
         self._cached_prep_chain = None # For change detection
@@ -40,7 +42,8 @@ class AnalysisViewModel(QObject):
         
     def on_mode_changed(self, mode):
         # Trigger re-processing when mode changes
-        self._cached_ref_cube = None # Mode changed -> Ref/Abs/Raw changed -> Invalidate Cude
+        # AI가 수정함: Raw Cube는 유지, 변환된 결과만 무효화
+        self._cached_ref_cube = None  # Mode changed -> 변환 결과만 무효화
         self._cached_masked_mean = None 
         self.params_changed.emit()
         self.model_updated.emit()
@@ -188,8 +191,8 @@ class AnalysisViewModel(QObject):
             # If file changed, we must reload (and invalidates everything)
             file_changed = (file_path != self._cached_file_path)
             
-            # If Ref Cache is missing (First load or Mode changed), we must compute it
-            if file_changed or self._cached_ref_cube is None:
+            # AI가 수정함: Raw Cube와 변환된 Cube 분리 캐싱
+            if file_changed or self._cached_raw_cube is None:
                 # 1. Load Raw
                 if file_path in self.main_vm.data_cache:
                     raw_cube, waves = self.main_vm.data_cache[file_path]
@@ -198,53 +201,58 @@ class AnalysisViewModel(QObject):
                     raw_cube = np.nan_to_num(raw_cube)
                     self.main_vm.data_cache[file_path] = (raw_cube, waves)
                 
-                # 2. Mode Conversion (Raw -> Ref, or Raw -> Abs)
+                # AI가 수정함: Raw Cube 별도 캐시 (마스킹용)
+                self._cached_raw_cube = raw_cube
+                self._cached_file_path = file_path
+                self._cached_ref_cube = None  # 새 파일 -> 변환 결과 무효화
+                self._cached_masked_mean = None  # New data -> New mean needed
+            
+            # 시각화용 변환된 Cube 캐시 (Mode에 따라)
+            if self._cached_ref_cube is None:
                 mode = self.processing_mode
                 if mode == "Reflectance":
-                    self._cached_ref_cube = self._convert_to_ref(raw_cube)
+                    self._cached_ref_cube = self._convert_to_ref(self._cached_raw_cube)
                 elif mode == "Absorbance":
-                    # Optimization: create_background_mask might need Ref or Abs? 
-                    # Usually mask is done on Intensity (Raw or Ref). 
-                    # But Absorbance is -log(Ref).
-                    # Current logic: Ref -> Abs
-                    ref_cube = self._convert_to_ref(raw_cube)
+                    ref_cube = self._convert_to_ref(self._cached_raw_cube)
                     self._cached_ref_cube = processing.apply_absorbance(ref_cube)
-                else: # Raw
-                    self._cached_ref_cube = raw_cube
-                
-                # Update Cache State
-                self._cached_file_path = file_path
-                self._cached_masked_mean = None # New data -> New mean needed
+                else:  # Raw
+                    self._cached_ref_cube = self._cached_raw_cube
             
-            # If we are here, self._cached_ref_cube has the correct Cube (Raw/Ref/Abs)
             # Retrieve waves if not loaded above
             if waves is None:
                  if file_path in self.main_vm.data_cache:
                      _, waves = self.main_vm.data_cache[file_path]
             
             # -------------------------------------------------------------
-            # LEVEL 2: Masking & Mean Calculation (Heavy Boolean Ops)
+            # LEVEL 2: Masking & Mean Calculation (Raw 기준 마스킹)
             # -------------------------------------------------------------
-            
-            # Check if we need to re-calculate Mean
-            # Conditions: Mean cache empty OR Mask Params changed
-            # current_mask_params = (self.threshold, self.mask_rules)
-            
-            # Note: We rely on _cached_masked_mean being cleared by setters.
+            # AI가 수정함: 설계 원칙 - 마스킹은 Raw 값 기준으로 수행
             
             if self._cached_masked_mean is None:
-                cube_to_mask = self._cached_ref_cube
+                # 1. Masking on RAW Cube (설계 원칙: MaskRules는 Raw DN 값 기준)
+                mask = processing.create_background_mask(
+                    self._cached_raw_cube, self.threshold, self.mask_rules
+                )
                 
-                # Create mask (Always returns boolean mask)
-                mask = processing.create_background_mask(cube_to_mask, self.threshold, self.mask_rules)
-                valid_pixels = processing.apply_mask(cube_to_mask, mask)
+                # 2. Apply Mask to get valid pixels from RAW
+                valid_raw = processing.apply_mask(self._cached_raw_cube, mask)
                 
-                # print(f"[DEBUG] Re-Masking: Th={self.threshold}, Pixels={valid_pixels.shape[0]}")
-                
-                if valid_pixels.size == 0:
-                    # print("[WARN] All pixels masked!")
+                if valid_raw.size == 0:
                     return None, waves
-                    
+                
+                # 3. Convert valid pixels only (Raw -> Ref/Abs)
+                mode = self.processing_mode
+                if mode in ["Reflectance", "Absorbance"]:
+                    valid_pixels = ProcessingService.convert_to_ref_flat(
+                        valid_raw, 
+                        self.main_vm.cache_white, 
+                        self.main_vm.cache_dark
+                    )
+                    if mode == "Absorbance":
+                        valid_pixels = processing.apply_absorbance(valid_pixels)
+                else:
+                    valid_pixels = valid_raw.astype(np.float32)
+                
                 # Compute Mean
                 self._cached_masked_mean = np.mean(valid_pixels, axis=0)
                 

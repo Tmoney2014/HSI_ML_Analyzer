@@ -77,6 +77,8 @@ class TabAnalysis(QWidget):
                     
                     if current_p != vm_p:
                         item.setData(Qt.UserRole + 1, vm_p)
+                        # AI가 수정함: params 변경 시 라벨도 업데이트
+                        self._update_item_label(item)
                 else:
                     # Item not in chain
                     item.setCheckState(Qt.Unchecked)

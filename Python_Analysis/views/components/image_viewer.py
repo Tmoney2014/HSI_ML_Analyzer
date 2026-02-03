@@ -98,7 +98,12 @@ class ImageViewer(QWidget):
             mode = self.vm.processing_mode
             threshold = self.vm.threshold
             
-            # Helper: Get Ref or Raw
+            # AI가 수정함: 설계 원칙 - 마스킹은 Raw 기준, 시각화는 변환된 값 사용
+            
+            # 마스킹: Raw Cube 기준 (MaskRules는 Raw DN 값)
+            mask = processing.create_background_mask(self.cube, threshold, self.vm.mask_rules)
+            
+            # 시각화: 변환된 값 사용 (사용자가 볼 스케일)
             if mode in ["Reflectance", "Absorbance"]:
                 data_viz = self.vm._convert_to_ref(self.cube)
                 if mode == "Absorbance":
@@ -107,8 +112,6 @@ class ImageViewer(QWidget):
                 data_viz = self.cube
             
             self.processed_cube = data_viz
-            
-            mask = processing.create_background_mask(data_viz, threshold, self.vm.mask_rules)
             
             # 2. Draw
             self.figure.clear()

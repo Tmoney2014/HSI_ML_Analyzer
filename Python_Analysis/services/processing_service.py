@@ -70,34 +70,63 @@ class ProcessingService:
         return np.clip((cube.astype(np.float32) - d) / denom, 0.0, 1.0)
 
     @staticmethod
+    def convert_to_ref_flat(flat_data, white_ref, dark_ref=None):
+        """
+        /// <ai>AI가 작성함</ai>
+        Convert flattened Raw data (N, B) to Reflectance.
+        For use after masking when data is already flattened.
+        
+        Args:
+            flat_data: Flattened raw data (N_pixels, Bands)
+            white_ref: White reference vector (Bands,)
+            dark_ref: Dark reference vector (Bands,), optional
+        
+        Returns:
+            ref_data: Reflectance values clipped to [0, 1]
+        """
+        if white_ref is None:
+            return flat_data.astype(np.float32)
+        
+        d = dark_ref if dark_ref is not None else np.zeros_like(white_ref)
+        denom = (white_ref - d).astype(np.float32)
+        denom[denom == 0] = 1e-6
+        
+        return np.clip((flat_data.astype(np.float32) - d) / denom, 0.0, 1.0)
+
+    @staticmethod
     def get_base_data(cube, mode, threshold, mask_rules, white_ref=None, dark_ref=None):
         """
+        /// <ai>AI가 수정함: 마스킹 순서를 Raw 단계로 변경</ai>
         Generates Base Data (Masked valid pixels, Ref/Abs converted, but NO Preprocessing).
+        
+        설계 원칙: 마스킹은 반드시 Raw 데이터 단계에서 수행.
+        - MaskRules는 항상 Raw DN 값 기준 (예: b80 > 35000)
+        - 성능: 배경 픽셀에 불필요한 Log 연산 회피
+        - 일관성: Python 학습 ↔ C# 추론 동일 기준
         """
         # 1. Input Sanitization
         cube = np.nan_to_num(cube)
         
-        # 2. Convert to Reflectance / Absorbance
-        # AI가 수정함: convert_to_ref 메서드로 통합
-        data_cube = cube
-        
-        if mode in ["Reflectance", "Absorbance"]:
-            data_cube = ProcessingService.convert_to_ref(cube, white_ref, dark_ref)
-        
-        # Standardize Absorbance Logic
-        if mode == "Absorbance":
-             # Apply log(1/R) -> -log(R)
-             data_cube = np.where(data_cube <= 0, 1e-6, data_cube)
-             data_cube = -np.log10(data_cube)
-            
-        # 3. Masking
-        mask = processing.create_background_mask(data_cube, threshold, mask_rules)
+        # 2. Masking FIRST on Raw Cube (설계 원칙)
+        # AI가 수정함: Raw 값 기준으로 마스킹하여 학습-추론 일관성 보장
+        mask = processing.create_background_mask(cube, threshold, mask_rules)
         if mask.dtype != bool: 
             mask = mask.astype(bool)
-            
-        # 4. Apply Mask
-        # Returns (N, B)
-        flat_data = processing.apply_mask(data_cube, mask)
+        
+        # 3. Apply Mask to Raw Cube (get valid pixels only)
+        flat_raw = processing.apply_mask(cube, mask)  # (N, B)
+        
+        # 4. Convert valid pixels only to Ref/Abs
+        if mode in ["Reflectance", "Absorbance"]:
+            flat_data = ProcessingService.convert_to_ref_flat(flat_raw, white_ref, dark_ref)
+        else:
+            flat_data = flat_raw.astype(np.float32)
+        
+        # 5. Absorbance Transform (on valid pixels only)
+        if mode == "Absorbance":
+            # Apply log(1/R) -> -log(R)
+            flat_data = np.where(flat_data <= 0, 1e-6, flat_data)
+            flat_data = -np.log10(flat_data)
         
         return flat_data, mask
 
