@@ -71,23 +71,35 @@ class OptimizationService(QObject):
         start_gap = target_prep['params'].get('gap', 1)
         self.log_message.emit(f"   Start Gap: {start_gap}")
         
-        def gap_evaluator(val):
+        # AI가 수정함: 전체 탐색 (1~40 일률 평가 후 최선 선택)
+        max_gap = 40
+        candidates = list(range(1, max_gap + 1))
+        self.log_message.emit(f"   🔍 전체 탐색: Gap 1~{max_gap}")
+        
+        best_gap = start_gap
+        best_gap_acc = current_acc
+        best_gap_params = best_params
+        
+        for gap_val in candidates:
             p = copy.deepcopy(best_params)
             for s in p['prep']:
                 if s['name'] == target_prep['name']:
-                    s['params']['gap'] = val
+                    s['params']['gap'] = gap_val
             acc = trial_callback(p)
             history.append((copy.deepcopy(p), acc))
-            return acc, p
-
-        best_gap, gap_acc, best_p_gap = self.lookahead_hill_climbing(
-            start_val=start_gap, step=2, lookahead=3, max_val=50, 
-            evaluator=gap_evaluator, initial_acc=current_acc, initial_params_obj=best_params
-        )
+            self.log_message.emit(f"    • Gap={gap_val}: {acc:.2f}%")
+            
+            if acc > best_gap_acc:
+                best_gap_acc = acc
+                best_gap = gap_val
+                best_gap_params = p
         
-        if gap_acc > current_acc:
-            self.log_message.emit(f" -> Found Better Gap: {start_gap} -> {best_gap} (+{gap_acc - current_acc:.2f}%)")
-            return best_p_gap, gap_acc, target_prep
+        # 최종 결과 로그
+        self.log_message.emit(f"   🏆 Best Gap: {best_gap} @ {best_gap_acc:.2f}%")
+        
+        if best_gap_acc > current_acc:
+            self.log_message.emit(f" -> Found Better Gap: {start_gap} -> {best_gap} (+{best_gap_acc - current_acc:.2f}%)")
+            return best_gap_params, best_gap_acc, target_prep
         else:
             self.log_message.emit(" -> No improvement on Gap.")
             return best_params, current_acc, target_prep

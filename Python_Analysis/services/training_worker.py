@@ -16,7 +16,7 @@ class TrainingWorker(QObject):
     training_finished = pyqtSignal(bool)
     base_data_ready = pyqtSignal(object, object)  # AI가 수정함: Base Data (X_base, y) 캐시용
     
-    def __init__(self, file_groups, analysis_vm_state, main_vm_cache, params):
+    def __init__(self, file_groups, analysis_vm_state, main_vm_cache, params, colors_map=None):
         super().__init__()
         self.file_groups = file_groups
         # Snapshot of state
@@ -38,6 +38,9 @@ class TrainingWorker(QObject):
         # AI가 수정함: precomputed_data 제거, base_data_cache만 사용
         self.base_data_cache = params.get('base_data_cache')  # (X_base, y) - NO Preprocessing
         self.is_running = True
+        
+        # AI가 수정함: 색상 맵 저장
+        self.colors_map = colors_map
 
     def run(self):
         try:
@@ -112,14 +115,32 @@ class TrainingWorker(QObject):
             
             X_sub = X[:, selected_indices]
             service = LearningService()
-            model, acc = service.train_model(X_sub, y, model_type=model_type, test_ratio=test_ratio)
+            # AI가 수정함: 로그 콜백 연결 (UI 출력)
+            model, acc = service.train_model(
+                X_sub, y, 
+                model_type=model_type, 
+                test_ratio=test_ratio,
+                log_callback=self.log_message.emit if not silent else None
+            )
             
             if not silent: self.log_message.emit(f"Training Accuracy: {acc*100:.2f}%")
             self.progress_update.emit(100)
             
             # 5. Export
-            # Construct colors map (Default to Green/Red/Blue...)
-            colors_map = {str(k): "#00FF00" for k in label_map.keys()} 
+            # Construct colors map
+            if self.colors_map:
+                # self.colors_map: {GroupName: Color}
+                # label_map: {ClassID: GroupName}
+                # Target: {ClassID: Color}
+                final_colors_map = {}
+                for cid, gname in label_map.items():
+                    # gname might be int or str depending on logic, ensure match
+                    if gname in self.colors_map:
+                        final_colors_map[str(cid)] = self.colors_map[gname]
+                    else:
+                        final_colors_map[str(cid)] = "#00FF00" # Default
+            else:
+                final_colors_map = {str(k): "#00FF00" for k in label_map.keys()} 
             
             service.export_model(
                 model, 
@@ -129,7 +150,7 @@ class TrainingWorker(QObject):
                 processing_mode=self.processing_mode,
                 mask_rules=self.mask_rules,
                 label_map={str(k):v for k,v in label_map.items()},
-                colors_map=colors_map,
+                colors_map=final_colors_map,
                 exclude_rules=self.exclude_bands_str, 
                 threshold=self.threshold,
                 mean_spectrum=mean_spec.tolist() if mean_spec is not None else None,
