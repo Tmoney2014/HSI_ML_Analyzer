@@ -1,8 +1,10 @@
 import numpy as np
 from sklearn.decomposition import PCA
 from scipy.signal import savgol_filter
+from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
-def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None):
+def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, keep_order=False):
+    # AI가 수정함: keep_order 파라미터 추가 - SPA 선택 순서 유지 옵션
     """
     Select top-k significant bands/wavelengths using SPA analysis.
     
@@ -38,11 +40,11 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None):
     if X.shape[1] == 0:
         return [], np.zeros(n_features), np.zeros(n_features)
 
-    # 1. Mean Spectrum
-    mean_spectrum = np.mean(X, axis=0)
+    # AI가 수정함: 데드 코드 제거 (mean_spectrum은 함수 끝에서 global_mean으로 계산됨)
     
-    # 2. Selection Logic
+    # 1. Selection Logic
     selected_internal_indices = []
+    # AI가 수정함: importance_scores를 SPA 루프에서 계산하도록 변경
     importance_scores = np.zeros(X.shape[1])
     
     if method == 'variance':
@@ -54,11 +56,13 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None):
     else: # Default: SPA-like (using Projections or PCA Loadings)
         # Standard SPA Implementation
         # 1. Downsample if too large (for speed)
-        if X.shape[0] > 10000:
+        # AI가 수정함: 설정 파일에서 값 로드
+        max_samples = cfg_get('spa', 'max_samples', 10000)
+        if X.shape[0] > max_samples:
              # Just a safety cap for VERY large data (e.g. >10k) to prevent freezing
              # But use deterministic random
              rng = np.random.RandomState(42)
-             indices = rng.choice(X.shape[0], 10000, replace=False)
+             indices = rng.choice(X.shape[0], max_samples, replace=False)
              X_spa = X[indices, :]
         else:
              X_spa = X
@@ -80,8 +84,9 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None):
         
         P = X_spa.copy()
         
-        # Importance score for visualization (Norm of projected vector at each step)
-        importance_scores = np.std(X, axis=0) 
+        # AI가 수정함: 초기 Norm을 Candidate Bands로 저장 (시각화용)
+        initial_norms = np.linalg.norm(P, axis=0)
+        importance_scores = initial_norms.copy()
         
         for k in range(n_proj):
             # Calculate norms of all columns (bands)
@@ -115,7 +120,10 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None):
             
     # Map back to original indices
     final_indices = [valid_indices[i] for i in selected_internal_indices]
-    final_indices.sort()
+    
+    # AI가 수정함: keep_order=False일 때만 정렬 (기본 동작 유지)
+    if not keep_order:
+        final_indices.sort()
     
     # Prepare global importance array
     global_importance = np.zeros(n_features)

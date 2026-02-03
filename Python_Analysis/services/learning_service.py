@@ -10,6 +10,7 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import matplotlib.pyplot as plt
 import seaborn as sns # Optional, for nicer plots if installed
+from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
 class LearningService:
     def train_model(self, X, y, model_type="Linear SVM", test_ratio=0.2):
@@ -45,7 +46,7 @@ class LearningService:
 
     def _train_svm(self, X, y, test_ratio):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
-        model = LinearSVC(dual=False, max_iter=1000)
+        model = LinearSVC(dual=False, max_iter=cfg_get('model', 'svm_max_iter', 1000))  # AI가 수정함
         try:
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
@@ -237,10 +238,22 @@ class LearningService:
                 elif name == "Center": prep_flat["ApplyCenter"] = True
                 # Absorbance is handled by Mode
         
+        # AI가 수정함: RequiredRawBands 계산 - Gap Diff 적용 시 원본 밴드 + Gap 밴드 필요
+        required_raw_bands = set()
+        gap = prep_flat.get("Gap", 5) if prep_flat.get("ApplyDeriv") else 0
+        
+        for b in selected_bands:
+            required_raw_bands.add(int(b))
+            if gap > 0:
+                required_raw_bands.add(int(b) + gap)  # Gap Diff에 필요한 추가 밴드
+        
+        required_raw_bands_sorted = sorted(list(required_raw_bands))
+        
         export_data = {
             "ModelType": "LinearModel", # Unified name
             "OriginalType": model_type_name,
             "SelectedBands": [int(b) for b in selected_bands],
+            "RequiredRawBands": required_raw_bands_sorted,  # AI가 추가함: 런타임용 원본 밴드 목록
             "ExcludeBands": exclude_rules if exclude_rules else "",
             "Weights": weights,
             "Bias": bias,

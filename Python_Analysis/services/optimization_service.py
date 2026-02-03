@@ -1,5 +1,6 @@
 from PyQt5.QtCore import QObject, pyqtSignal
 import copy # Added deepcopy
+from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
 class OptimizationService(QObject):
     """
@@ -117,7 +118,10 @@ class OptimizationService(QObject):
             return acc, p
 
         best_th, th_acc, best_p_th = self.lookahead_hill_climbing(
-            start_val=start_th, step=100, lookahead=3, max_val=2000,
+            start_val=start_th,
+            step=cfg_get('optimization', 'ndi_step', 100),  # AI가 수정함
+            lookahead=cfg_get('optimization', 'ndi_lookahead', 3),
+            max_val=cfg_get('optimization', 'ndi_max_val', 2000),
             evaluator=ndi_evaluator, initial_acc=current_acc, initial_params_obj=best_params
         )
         

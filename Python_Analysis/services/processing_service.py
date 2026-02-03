@@ -111,7 +111,7 @@ class ProcessingService:
             p = step.get('params', {})
             
             if name == "SG": 
-                flat_data = processing.apply_savgol(flat_data, p.get('win'), p.get('poly'), p.get('deriv', 0))
+                flat_data = processing.apply_savgol(flat_data, p.get('win', 4), p.get('poly', 1), p.get('deriv', 0))
             elif name == "SimpleDeriv": 
                 flat_data = processing.apply_simple_derivative(
                     flat_data, 
