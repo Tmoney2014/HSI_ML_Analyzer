@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QGroupBox, 
-                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox)
+                             QListWidget, QPushButton, QLabel, QLineEdit, QSlider, QListWidgetItem, QProgressDialog, QApplication, QMessageBox, QDialog)
 from PyQt5.QtCore import Qt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas

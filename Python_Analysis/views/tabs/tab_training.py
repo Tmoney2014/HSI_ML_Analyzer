@@ -118,6 +118,10 @@ class TabTraining(QWidget):
     def on_finished(self, success):
         self.set_buttons_enabled(True)
         if success:
+            # AI가 수정함: 최적화 결과의 n_features를 UI에 반영
+            if hasattr(self.vm, 'best_n_features') and self.vm.best_n_features:
+                self.spin_bands.setValue(self.vm.best_n_features)
+                self.vm.best_n_features = None  # 1회성 사용 후 초기화
             self.append_log("Done.")
         else:
             self.append_log("Failed.")

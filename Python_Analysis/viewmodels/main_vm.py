@@ -5,6 +5,7 @@ import os
 from services.data_loader import load_hsi_data
 from collections import OrderedDict
 import threading
+from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 try:
     import psutil
 except ImportError:
@@ -94,7 +95,11 @@ class MainViewModel(QObject):
         
         # Cache for loaded cubes to avoid re-reading disk (path -> (cube, waves))
         # Use SmartCache for LRU and Memory Protection
-        self.data_cache = SmartCache(max_items=20, min_memory_gb=1.0)
+        # AI가 수정함: 설정 파일에서 값 로드
+        self.data_cache = SmartCache(
+            max_items=cfg_get('cache', 'max_items', 20),
+            min_memory_gb=cfg_get('cache', 'min_memory_gb', 1.0)
+        )
         
         # Reference Data Cache (Loaded Arrays)
         self.cache_white: Optional[np.ndarray] = None
