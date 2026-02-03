@@ -11,6 +11,8 @@ class AnalysisViewModel(QObject):
     # Signal for UI updates
     model_updated = pyqtSignal() # When processing chain or params change significantly affecting visualization
     params_changed = pyqtSignal() # When any parameter changes (for Auto-Save)
+    # AI가 수정함: Base Data에 영향을 주는 변경만 별도 시그널로 분리 (Gap 등 전처리 변경은 제외)
+    base_data_invalidated = pyqtSignal() # When threshold, mask_rules change (actual base data impact)
 
     def __init__(self, main_vm: MainViewModel):
         super().__init__()
@@ -96,6 +98,7 @@ class AnalysisViewModel(QObject):
         if self.threshold != val:
             self.threshold = val
             self._cached_masked_mean = None # Mask changed -> Mean changed
+            self.base_data_invalidated.emit()  # AI가 수정함: Base Data 무효화 시그널
             self.params_changed.emit()
             self.model_updated.emit()
         
@@ -103,6 +106,7 @@ class AnalysisViewModel(QObject):
         if self.mask_rules != rules:
             self.mask_rules = rules
             self._cached_masked_mean = None # Mask changed -> Mean changed
+            self.base_data_invalidated.emit()  # AI가 수정함: Base Data 무효화 시그널
             self.params_changed.emit()
             self.model_updated.emit()
         

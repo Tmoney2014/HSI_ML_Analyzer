@@ -9,14 +9,14 @@ import os
 class TrainingWorker(QObject):
     """
     Worker class to run training in a background thread.
-    Refactored for Robustness & Smart Caching (No Pixel Limits).
+    AI가 수정함: 캐시 구조 통합 - Base Data만 캐시
     """
     progress_update = pyqtSignal(int)
     log_message = pyqtSignal(str)
     training_finished = pyqtSignal(bool)
-    data_ready = pyqtSignal(object, object) # Emits (X, y) for caching
+    base_data_ready = pyqtSignal(object, object)  # AI가 수정함: Base Data (X_base, y) 캐시용
     
-    def __init__(self, file_groups, analysis_vm_state, main_vm_cache, params, precomputed_data=None):
+    def __init__(self, file_groups, analysis_vm_state, main_vm_cache, params):
         super().__init__()
         self.file_groups = file_groups
         # Snapshot of state
@@ -35,8 +35,8 @@ class TrainingWorker(QObject):
         self.data_cache = main_vm_cache 
         
         self.params = params 
-        self.precomputed_data = precomputed_data # (X, y) Fully Processed
-        self.base_data_cache = params.get('base_data_cache') # (X, y) Ref/Masked Only
+        # AI가 수정함: precomputed_data 제거, base_data_cache만 사용
+        self.base_data_cache = params.get('base_data_cache')  # (X_base, y) - NO Preprocessing
         self.is_running = True
 
     def run(self):
@@ -55,13 +55,13 @@ class TrainingWorker(QObject):
 
             # 2. Data Acquisition (Smart Cache Check)
             self.progress_update.emit(0)
-            X, y, label_map = self._get_data_with_caching(silent)
+            X, y, label_map, base_data_emitted = self._get_data_with_caching(silent)
             
             if X is None or not self.is_running: return # Error or Stopped
 
-            # Cache Emit (If new data was processed)
-            if self.precomputed_data is None:
-                self.data_ready.emit(X, y)
+            # AI가 수정함: Base Data 캐시 emit (전처리 전 데이터)
+            if base_data_emitted:
+                self.base_data_ready.emit(base_data_emitted[0], base_data_emitted[1])
 
             self.progress_update.emit(60)
 
@@ -82,6 +82,10 @@ class TrainingWorker(QObject):
                             exclude_indices.append(int(part) - 1)
                 except:
                     if not silent: self.log_message.emit("Warning: Failed to parse exclude bands string.")
+            
+            # AI가 수정함: Gap Diff로 밴드 수가 줄어들면 범위 초과 인덱스 무시
+            n_bands = X.shape[1]
+            exclude_indices = [i for i in exclude_indices if 0 <= i < n_bands]
             
             # SPA Downsampling (Optimization for Selection ONLY)
             # Use max 3000 samples for SPA speed, but train on FULL data
@@ -178,8 +182,9 @@ class TrainingWorker(QObject):
 
     def _get_data_with_caching(self, silent):
         """
-        Returns (X, y, label_map).
-        Decides whether to use precomputed_data or load from files.
+        AI가 수정함: 캐시 구조 통합
+        Returns (X_preprocessed, y, label_map, base_data_to_emit).
+        base_data_to_emit: (X_base, y) if new data was loaded, None if cache was used.
         """
         # Prepare Label Map first (needed in both cases)
         EXCLUDED_NAMES = ["-", "unassigned", "trash", "ignore"]
@@ -190,26 +195,31 @@ class TrainingWorker(QObject):
         for label_id, (class_name, _) in enumerate(valid_groups.items()):
             label_map[label_id] = class_name
 
-        # 1. Fast Path (Fully Precomputed)
-        if self.precomputed_data is not None:
-            if not silent: self.log_message.emit("⚡ Smart Cache Hit! Reusing processed data (Instant Start)...")
-            X, y = self.precomputed_data
-            return X, y, label_map
-            
-        # 2. Medium Path (Base Data Cache - Masked but need Prep)
+        # 1. Cache Hit Path (Base Data 캐시 있음 → 전처리만 적용)
         if self.base_data_cache is not None:
              if not silent: self.log_message.emit("⚡ Base Data Cache Hit! Reusing masked data, applying preprocessing...")
              X_base, y_base = self.base_data_cache
              
              X = ProcessingService.apply_preprocessing_chain(X_base, self.prep_chain)
-             return X, y_base, label_map
+             return X, y_base, label_map, None  # 캐시 사용 → emit 안함
 
-        # 3. Slow Path
+        # 2. Cache Miss Path (파일 로드 → Base Data 생성 → 전처리 적용)
         if not silent: self.log_message.emit("Starting File Loading & Processing...")
-        X, y = self._load_and_process_files(valid_groups, silent)
-        return X, y, label_map
+        X_base, y = self._load_and_process_base_data(valid_groups, silent)
+        
+        if X_base is None:
+            return None, None, label_map, None
+        
+        # 전처리 적용
+        X = ProcessingService.apply_preprocessing_chain(X_base, self.prep_chain)
+        
+        return X, y, label_map, (X_base, y)  # 새 Base Data → emit
 
-    def _load_and_process_files(self, valid_groups, silent):
+    def _load_and_process_base_data(self, valid_groups, silent):
+        """
+        AI가 수정함: Base Data만 반환 (전처리는 호출자에서 적용)
+        Returns (X_base, y) - NO Preprocessing applied.
+        """
         X_all = []
         y_all = []
         
@@ -233,7 +243,7 @@ class TrainingWorker(QObject):
                     
                     cube = np.nan_to_num(cube)
                     
-                    # 1. Get Base Data (Reflectance + Masked)
+                    # Get Base Data (Reflectance + Masked, NO Preprocessing)
                     data_base, mask = ProcessingService.get_base_data(
                         cube,
                         mode=self.processing_mode,
@@ -244,10 +254,8 @@ class TrainingWorker(QObject):
                     )
                     
                     if data_base.shape[0] > 0:
-                        # Append to Base List
                         X_all.append(data_base)
                         y_all.append(np.full(data_base.shape[0], label_id))
-                        # processed_cnt logic can remain same
                         
                 except Exception as e:
                     if not silent: self.log_message.emit(f"Error processing {f}: {e}")
@@ -255,21 +263,11 @@ class TrainingWorker(QObject):
                 processed_cnt += 1
                 if not silent: self.progress_update.emit(int((processed_cnt / total_files) * 50))
 
+        if not X_all:
+            return None, None
+            
         X_base = np.vstack(X_all)
         y_base = np.concatenate(y_all)
         
-        # 3. Emit Base Cache (Handoff to Auto-ML or next run)
-        if not silent: self.log_message.emit("💾 Caching Masked Data for future use...")
-        self.data_ready.emit(X_base, y_base)
-        
-        # 4. Apply Preprocessing Chain
-        try:
-             # Need import here or at top? It's imported at top? Yes, in imports.
-             # Wait, TrainingWorker imports ProcessingService.
-             pass
-        except: pass
-        
-        X_final = ProcessingService.apply_preprocessing_chain(X_base, self.prep_chain)
-        
-        if not silent: self.log_message.emit(f"Total Loaded Samples: {X_final.shape[0]}")
-        return X_final, y_base
+        if not silent: self.log_message.emit(f"Total Loaded Samples: {X_base.shape[0]}")
+        return X_base, y_base

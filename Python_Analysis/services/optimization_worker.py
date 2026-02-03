@@ -17,6 +17,8 @@ class OptimizationWorker(QObject):
     progress_update = pyqtSignal(int)
     log_message = pyqtSignal(str)
     optimization_finished = pyqtSignal(bool) # Success
+    data_ready = pyqtSignal(object, object)  # AI가 수정함: 캐시 저장용 (X, y)
+    base_data_ready = pyqtSignal(object, object)  # AI가 수정함: 통합 캐시용 Base Data
     
     def __init__(self, file_groups, vm_state, main_vm_cache, initial_params, base_data_cache=None):
         super().__init__()
@@ -69,6 +71,11 @@ class OptimizationWorker(QObject):
             self.log_message.emit(f"=== Optimization Finished. Best Accuracy: {history[-1][1]:.2f}% ===")
             
             self.best_params = best_params
+            
+            # AI가 수정함: 통합 캐시로 Base Data emit
+            if self.cached_X is not None and self.cached_y is not None:
+                self.base_data_ready.emit(self.cached_X, self.cached_y)
+            
             self.optimization_finished.emit(True)
             
         except Exception as e:
@@ -113,7 +120,9 @@ class OptimizationWorker(QObject):
         y_all = []
         
         # Load EVERYTHING
+        total_classes = len(valid_groups)
         for label_id, (class_name, files) in enumerate(valid_groups.items()):
+            class_pixels = 0  # AI가 수정함: 클래스별 픽셀 수 추적
             for f in files:
                 if not self.is_running: return False
                 try:
@@ -141,7 +150,11 @@ class OptimizationWorker(QObject):
                     if data.shape[0] > 0:
                         X_all.append(data)
                         y_all.append(np.full(data.shape[0], label_id))
+                        class_pixels += data.shape[0]
                 except: pass
+            
+            # AI가 수정함: 클래스별 로딩 완료 로그
+            self.log_message.emit(f"  [{label_id+1}/{total_classes}] {class_name}: {class_pixels:,} pixels")
         
         if not X_all: return False
         
@@ -179,6 +192,10 @@ class OptimizationWorker(QObject):
                     else:
                         exclude_indices.append(int(part) - 1)
             except: pass
+        
+        # AI가 수정함: Gap Diff로 밴드 수가 줄어들면 범위 초과 인덱스 무시
+        n_bands = X.shape[1]
+        exclude_indices = [i for i in exclude_indices if 0 <= i < n_bands]
 
         # Use Full Data for SPA (User Request: No Downsampling)
         dummy = X.reshape(-1, 1, X.shape[1])
