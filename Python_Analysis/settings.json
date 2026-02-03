@@ -1,0 +1,21 @@
+{
+  "cache": {
+    "max_items": 20,
+    "min_memory_gb": 1.0
+  },
+  "training": {
+    "default_test_ratio": 0.2,
+    "default_n_features": 5
+  },
+  "model": {
+    "svm_max_iter": 1000
+  },
+  "spa": {
+    "max_samples": 10000
+  },
+  "optimization": {
+    "ndi_step": 100,
+    "ndi_lookahead": 3,
+    "ndi_max_val": 2000
+  }
+}
