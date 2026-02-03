@@ -3,7 +3,7 @@ import os
 import numpy as np
 from sklearn.svm import LinearSVC
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.preprocessing import OneHotEncoder
 
@@ -13,7 +13,7 @@ import seaborn as sns # Optional, for nicer plots if installed
 from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
 class LearningService:
-    def train_model(self, X, y, model_type="Linear SVM", test_ratio=0.2):
+    def train_model(self, X, y, model_type="Linear SVM", test_ratio=0.2, log_callback=None):
         """
         Unified Factory Method for Model Training.
         
@@ -22,55 +22,80 @@ class LearningService:
             y: Labels
             model_type: "Linear SVM", "PLS-DA", "LDA"
             test_ratio: Validation split ratio (0.1 ~ 0.5)
-            
-        Returns:
-            model: Trained sklearn model object
-            acc: Validation accuracy (0.0 ~ 1.0)
+            log_callback: Function(str) to print logs to UI
         """
+        # Helper logging
+        def log(msg):
+            if log_callback: log_callback(msg)
+            else: print(msg)
+
         # Validate Ratio
         if test_ratio < 0.05 or test_ratio > 0.9: test_ratio = 0.2
         
-        print(f"   [LearningService] Training {model_type}... Samples: {X.shape[0]}, Features: {X.shape[1]}, Split: {test_ratio}")
+        log(f"   [LearningService] Training {model_type}... Samples: {X.shape[0]}, Features: {X.shape[1]}, Split: {test_ratio}")
         
         if model_type == "Linear SVM":
-            return self._train_svm(X, y, test_ratio)
+            return self._train_svm(X, y, test_ratio, log)
         elif model_type == "PLS-DA":
-            return self._train_pls(X, y, test_ratio)
+            return self._train_pls(X, y, test_ratio, log)
         elif model_type == "LDA":
-            return self._train_lda(X, y, test_ratio)
+            return self._train_lda(X, y, test_ratio, log)
         else:
-            print(f"   [Error] Unknown Model Type: {model_type}, falling back to SVM.")
-            return self._train_svm(X, y, test_ratio)
+            log(f"   [Error] Unknown Model Type: {model_type}, falling back to SVM.")
+            return self._train_svm(X, y, test_ratio, log)
 
     # --- Private Model Implementations ---
 
-    def _train_svm(self, X, y, test_ratio):
+    def _train_svm(self, X, y, test_ratio, log):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
         model = LinearSVC(dual=False, max_iter=cfg_get('model', 'svm_max_iter', 1000))  # AI가 수정함
         try:
             model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
-            acc = accuracy_score(y_test, y_pred)
-            print(f"   [LearningService] SVM Accuracy: {acc*100:.2f}%")
-            return model, acc
+            
+            # AI가 수정함: 과적합 지표 추가
+            y_train_pred = model.predict(X_train)
+            y_test_pred = model.predict(X_test)
+            
+            train_acc = accuracy_score(y_train, y_train_pred)
+            test_acc = accuracy_score(y_test, y_test_pred)
+            gap = (train_acc - test_acc) * 100
+            f1 = f1_score(y_test, y_test_pred, average='macro')
+            
+            # 과적합 경고
+            gap_warning = " ⚠️ 과적합 의심" if gap > 5 else ""
+            log(f"   [SVM] Train: {train_acc*100:.2f}% | Test: {test_acc*100:.2f}% | Gap: {gap:.1f}%{gap_warning}")
+            log(f"   [SVM] F1 (Macro): {f1:.3f}")
+            
+            return model, test_acc
         except Exception as e:
-            print(f"   [Error] SVM Training Failed: {e}")
+            log(f"   [Error] SVM Training Failed: {e}")
             raise
 
-    def _train_lda(self, X, y, test_ratio):
+    def _train_lda(self, X, y, test_ratio, log):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
         model = LinearDiscriminantAnalysis() # Defaults are usually good
         try:
             model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
-            acc = accuracy_score(y_test, y_pred)
-            print(f"   [LearningService] LDA Accuracy: {acc*100:.2f}%")
-            return model, acc
+            
+            # AI가 수정함: 과적합 지표 추가
+            y_train_pred = model.predict(X_train)
+            y_test_pred = model.predict(X_test)
+            
+            train_acc = accuracy_score(y_train, y_train_pred)
+            test_acc = accuracy_score(y_test, y_test_pred)
+            gap = (train_acc - test_acc) * 100
+            f1 = f1_score(y_test, y_test_pred, average='macro')
+            
+            gap_warning = " ⚠️ 과적합 의심" if gap > 5 else ""
+            log(f"   [LDA] Train: {train_acc*100:.2f}% | Test: {test_acc*100:.2f}% | Gap: {gap:.1f}%{gap_warning}")
+            log(f"   [LDA] F1 (Macro): {f1:.3f}")
+            
+            return model, test_acc
         except Exception as e:
-            print(f"   [Error] LDA Training Failed: {e}")
+            log(f"   [Error] LDA Training Failed: {e}")
             raise
 
-    def _train_pls(self, X, y, test_ratio):
+    def _train_pls(self, X, y, test_ratio, log):
         """
         PLS-DA Implementation using PLSRegression.
         Note: PLS is a regression algo, so we need One-Hot Encoding for multi-class classification.
@@ -96,11 +121,20 @@ class LearningService:
             model.fit(X_train, y_train_mat)
             
             # 3. Predict & converting back to class
-            y_pred_probs = model.predict(X_test)
-            y_pred = np.argmax(y_pred_probs, axis=1)
+            y_train_probs = model.predict(X_train)
+            y_train_pred = np.argmax(y_train_probs, axis=1)
+            y_test_probs = model.predict(X_test)
+            y_test_pred = np.argmax(y_test_probs, axis=1)
             
-            acc = accuracy_score(y_test, y_pred)
-            print(f"   [LearningService] PLS-DA Accuracy: {acc*100:.2f}%")
+            # AI가 수정함: 과적합 지표 추가
+            train_acc = accuracy_score(y_train, y_train_pred)
+            test_acc = accuracy_score(y_test, y_test_pred)
+            gap = (train_acc - test_acc) * 100
+            f1 = f1_score(y_test, y_test_pred, average='macro')
+            
+            gap_warning = " ⚠️ 과적합 의심" if gap > 5 else ""
+            log(f"   [PLS-DA] Train: {train_acc*100:.2f}% | Test: {test_acc*100:.2f}% | Gap: {gap:.1f}%{gap_warning}")
+            log(f"   [PLS-DA] F1 (Macro): {f1:.3f}")
             
             # Monkey Patching for Export Compatibility
             
@@ -147,7 +181,7 @@ class LearningService:
                  print("   [Warning] PLS Means not found. Assuming Zero Bias.")
                  model.export_intercept_ = np.zeros(n_targets_in)
             
-            return model, acc
+            return model, test_acc
             
         except Exception as e:
             print(f"   [Error] PLS-DA Training Failed: {e}")

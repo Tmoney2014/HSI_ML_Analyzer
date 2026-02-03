@@ -20,7 +20,7 @@ class OptimizationWorker(QObject):
     data_ready = pyqtSignal(object, object)  # AI가 수정함: 캐시 저장용 (X, y)
     base_data_ready = pyqtSignal(object, object)  # AI가 수정함: 통합 캐시용 Base Data
     
-    def __init__(self, file_groups, vm_state, main_vm_cache, initial_params, base_data_cache=None):
+    def __init__(self, file_groups, vm_state, main_vm_cache, initial_params, model_type="Linear SVM", base_data_cache=None):
         super().__init__()
         self.file_groups = file_groups
         # VM State Snapshot (Read-Only)
@@ -38,6 +38,7 @@ class OptimizationWorker(QObject):
         self.data_cache = main_vm_cache 
         self.initial_params = initial_params
         self.base_data_cache = base_data_cache # Handoff Data
+        self.model_type = model_type
         
         # Thread-safe Cache will be created in run() to ensure thread affinity
         self.service = None 
@@ -213,7 +214,7 @@ class OptimizationWorker(QObject):
         try:
             learning = LearningService()
             # If dataset is HUGE, this line will be the bottleneck in loop.
-            model, acc = learning.train_model(X_sub, y, model_type="Linear SVM", test_ratio=0.2)
+            model, acc = learning.train_model(X_sub, y, model_type=self.model_type, test_ratio=0.2)
             return acc * 100.0
         except:
             return 0.0

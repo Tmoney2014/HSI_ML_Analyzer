@@ -143,7 +143,13 @@ class TrainingViewModel(QObject):
         groups_copy = self.main_vm.file_groups.copy()
         
         # AI가 수정함: precomputed_data 제거, base_data_cache만 사용
-        self.worker = TrainingWorker(groups_copy, vm_state, self.main_vm.data_cache, params)
+        self.worker = TrainingWorker(
+            groups_copy, 
+            vm_state, 
+            self.main_vm.data_cache, 
+            params,
+            colors_map=self.main_vm.group_colors.copy() # AI가 수정함: 색상 전달
+        )
         self.worker.moveToThread(self.worker_thread)
         
         # 5. Connect Signals
@@ -262,6 +268,7 @@ class TrainingViewModel(QObject):
             vm_state, 
             self.main_vm.data_cache, 
             initial_params,
+            model_type=model_type,  # AI가 수정함: 모델 타입 전달
             base_data_cache=self.cached_base_data
         )
         self.opt_worker.moveToThread(self.opt_thread)
