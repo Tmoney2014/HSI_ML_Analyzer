@@ -12,11 +12,14 @@ from models import processing
 from services.processing_service import ProcessingService
 
 class ImageViewer(QWidget):
-    def __init__(self, path, analysis_vm, parent=None):
+    def __init__(self, path, analysis_vm, parent=None, title=None):
         super().__init__()
         self.path = path
         self.vm = analysis_vm # AnalysisViewModel
-        self.setWindowTitle(f"Image Viewer: {os.path.basename(path)}")
+        self.custom_title = title
+        
+        display_title = title if title else os.path.basename(path)
+        self.setWindowTitle(f"Image Viewer: {display_title}")
         self.resize(1000, 800)
         
         self.layout = QVBoxLayout(self)
@@ -165,7 +168,8 @@ class ImageViewer(QWidget):
             if self.show_graph_panel:
                 self.figure.tight_layout()
             
-            self.setWindowTitle(f"Detail Viewer: {os.path.basename(self.path)}")
+            display_title = self.custom_title if self.custom_title else os.path.basename(self.path)
+            self.setWindowTitle(f"Detail Viewer: {display_title}")
             self.canvas.draw()
             
         except Exception as e:

@@ -1,0 +1,19 @@
+{
+    "description": "Default configuration template for new projects. Edit this file to change defaults.",
+    "file_groups": {},
+    "group_colors": {},
+    "preprocessing_state": {},
+    "training_config": {
+        "model_type": "Linear SVM",
+        "val_ratio": 0.2,
+        "n_features": 5,
+        "output_folder": "./output",
+        "model_name": "model",
+        "model_desc": ""
+    },
+    "analysis_config": {
+        "threshold": 0.05,
+        "mask_rules": null,
+        "exclude_bands": ""
+    }
+}

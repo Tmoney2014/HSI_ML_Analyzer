@@ -235,7 +235,7 @@ class TabData(QWidget):
     def remove_group_click(self):
         item = self.list_groups.currentItem()
         if not item: return
-        name = item.text()
+        name = item.data(Qt.UserRole)
         
         reply = QMessageBox.question(self, 'Remove Class', 
                                      f"Delete class '{name}' and remove all files in it?",

@@ -32,6 +32,13 @@ class MainWindow(QMainWindow):
         self.analysis_vm.params_changed.connect(self.auto_save_slot) # Auto-save on Analysis Params
         self.main_vm.save_requested.connect(self.save_project) # Manual Save Button
         
+        # AI가 수정함: Debounced Save Timer
+        self.save_timer = QTimer()
+        self.save_timer.setSingleShot(True)
+        self.save_timer.timeout.connect(self._on_save_timer)
+        
+        self.training_vm.config_changed.connect(self._auto_save_debounced)
+        
         # 2. UI Setup
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -87,9 +94,15 @@ class MainWindow(QMainWindow):
         # AI가 수정함: 초기화 중 자동 저장 방지
         self.is_project_active = False
         self.main_vm.reset_session()
+        self._load_template() # AI가 수정함: 템플릿 로드
         self.main_vm.current_project_path = f
         self._do_save(f)
         
+        # AI가 추가함: 새 프로젝트 생성 시 UI도 초기값으로 갱신
+        self.tab_analysis.restore_ui()
+        if hasattr(self, 'tab_training'):
+            self.tab_training.init_from_vm_state()
+            
         # AI가 수정함: 프로젝트 활성화
         self.is_project_active = True
         
@@ -149,6 +162,7 @@ class MainWindow(QMainWindow):
             # AI가 수정함: 초기화 중 자동 저장 방지
             self.is_project_active = False
             self.main_vm.reset_session()
+            self._load_template() # AI가 수정함: 템플릿 로드
             
             # Set path and perform initial save
             self.main_vm.current_project_path = f
@@ -207,7 +221,9 @@ class MainWindow(QMainWindow):
             "mask_band": self.analysis_vm.mask_rules if self.analysis_vm.mask_rules else "Mean",
             "exclude_bands": self.analysis_vm.exclude_bands_str,
             "prep_chain": self.analysis_vm.prep_chain,
-            "preprocessing_state": self.analysis_vm.get_full_state()
+            "preprocessing_state": self.analysis_vm.get_full_state(),
+            # AI가 추가함: Training Config 통합 저장 (Source of Truth)
+            "training_config": self.training_vm.get_config()
         }
         try:
             with open(path, "w") as f:
@@ -222,10 +238,11 @@ class MainWindow(QMainWindow):
         # AI가 수정함: 프로젝트 로드 시 기존 세션 초기화 및 경로 안전 처리
         self.is_project_active = False  # <--- 로드 중 자동 저장 방지 (중요)
         self.main_vm.reset_session()
+        self._load_template() # AI가 추가함: VM 상태 초기화 (이전 값 제거)
         self.main_vm.current_project_path = None # 로드 중 에러 발생 시 잘못된 경로 유지 방지
         
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding='utf-8') as f: # AI가 수정함: utf-8 인코딩 명시
                 cfg = json.load(f)
             
             # Logic similar to load_session but uses cfg
@@ -281,6 +298,17 @@ class MainWindow(QMainWindow):
             # Restore UI
             self.tab_analysis.restore_ui()
             
+            # AI가 추가함: Training Config 복원
+            if "training_config" in cfg:
+                self.training_vm.set_config(cfg["training_config"])
+            else:
+                # 구버전 파일 호환성: 기본값 혹은 빈 dict로 초기화
+                self.training_vm.set_config({}) 
+                
+            # AI가 추가함: Training UI에 값 반영
+            if hasattr(self, 'tab_training'):
+                self.tab_training.init_from_vm_state()
+            
             self.main_vm.current_project_path = path
             self.setWindowTitle(f"HSI Professional Analyzer - {os.path.basename(path)}")
             self.status_bar.showMessage(f"Project loaded: {path}")
@@ -314,3 +342,54 @@ class MainWindow(QMainWindow):
         event.accept()
 
     # Removed legacy save_session methods
+
+    def _load_template(self):
+        """AI가 수정함: Default Template 로드하여 VM 초기화"""
+        template_path = os.path.join(os.path.dirname(__file__), "../default_project.json")
+        default_cfg = {}
+        if os.path.exists(template_path):
+            try:
+                with open(template_path, 'r', encoding='utf-8') as f:
+                    default_cfg = json.load(f)
+            except Exception as e:
+                print(f"Template Load Error: {e}")
+        
+        # Apply Template
+        if "training_config" in default_cfg:
+            self.training_vm.set_config(default_cfg["training_config"])
+        else:
+            # Hardcoded Fallback
+            self.training_vm.set_config({
+                "output_path": "./output/model_config.json",
+                "model_type": "Linear SVM",
+                "val_ratio": 0.2,
+                "n_features": 5
+            })
+            
+        # AI가 추가함: Analysis Config 초기화 (잔존 데이터 제거)
+        if "analysis_config" in default_cfg:
+            ac = default_cfg["analysis_config"]
+            self.analysis_vm.threshold = float(ac.get("threshold", 0.05))
+            self.analysis_vm.mask_rules = ac.get("mask_rules") if ac.get("mask_rules") else None
+            self.analysis_vm.exclude_bands_str = ac.get("exclude_bands", "")
+        else:
+             self.analysis_vm.threshold = 0.05
+             self.analysis_vm.mask_rules = None
+             self.analysis_vm.exclude_bands_str = ""
+             
+        # 중요: View의 Analysis Tab UI 리셋은 restore_ui 시 처리되지만, 값 자체는 여기서 리셋 필요
+        # preprocessing_state는 템플릿에 있을 수도 있고 없을 수도 있음 (보통 비활성화 상태)
+        if "preprocessing_state" in default_cfg:
+             self.analysis_vm.set_full_state(default_cfg["preprocessing_state"])
+        else:
+             self.analysis_vm.set_full_state([]) # 모두 비활성화 or 초기화
+            
+    def _auto_save_debounced(self):
+        """AI가 수정함: Debounced Auto-Save Slot"""
+        if not self.is_project_active: return
+        self.save_timer.start(1000) # 1 sec delay (Restart timer if called again)
+        
+    def _on_save_timer(self):
+        """Timer Callback"""
+        if self.is_project_active:
+            self.auto_save_slot()

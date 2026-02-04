@@ -389,7 +389,7 @@ class TabAnalysis(QWidget):
                 for name, key in default_steps:
                     if key not in existing_keys:
                         # Add default
-                         self._add_prep_item(name, key, {}, False)
+                         self._add_prep_item(name, key, None, False)
                          
             else:
                 # 2. Legacy Fallback (Only active items known)
@@ -634,13 +634,16 @@ class TabAnalysis(QWidget):
 
     def open_image_window(self, item):
         path = item.data(Qt.UserRole)
+        # item text is formatted as "Group / Filename"
+        title = item.text()
+        
         # Check if already open
         for w in self.img_windows:
             if w.isVisible() and w.path == path:
                  w.raise_()
                  return
                  
-        win = ImageViewer(path, self.analysis_vm)
+        win = ImageViewer(path, self.analysis_vm, title=title)
         win.show()
         self.img_windows.append(win)
 
