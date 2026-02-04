@@ -108,7 +108,10 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
             # v_norm_sq = v.T @ v
             v_norm_sq = np.dot(v.T, v)
             
-            if v_norm_sq == 0: break # Numerical issue
+            if v_norm_sq == 0: 
+                # AI가 수정함: Strict Mode - 수학적 예외(Singularity) 발생 경고
+                print(f"Warning: SPA Numerical Singularity at iter {k}. Stopping selection early.")
+                break # Numerical issue
             
             # Projection Operator: proj(y) = (v.T @ y / v.T @ v) * v
             # Matrix form: P_new = P - v @ (v.T @ P / v.T @ v)

@@ -128,16 +128,17 @@ def apply_simple_derivative(data, gap: int = 5, order: int = 1, apply_ratio: boo
         diff_data: (N_pixels, New_Bands) 차분된 데이터
     """
     if gap < 1: return data
-    if order < 1: return data
+    if order < 1: 
+        raise ValueError(f"Strict Mode: Derivative order must be >= 1 (Got {order})")
     
     
     diff_data = data.copy()
     epsilon = 1e-6
     
-    for _ in range(order):
+    for i in range(order):
+        # AI가 수정함: 밴드 부족 시 에러 발생 (학습 기만 방지)
         if diff_data.shape[1] <= gap:
-            print(f"Warning: Cannot apply gap difference (Bands {diff_data.shape[1]} <= Gap {gap})")
-            break
+            raise ValueError(f"Strict Mode Error: Not enough bands for Derivative order {i+1}. Has {diff_data.shape[1]}, Need > {gap}.")
         
         # User Logic: data[:, :, :-GAP] - data[:, :, GAP:]
         # Note: 
@@ -193,12 +194,13 @@ def apply_rolling_3point_depth(data, gap: int = 5):
         depth_data: (N_pixels, New_Bands)
         New band count = Original - (2 * gap)
     """
-    if gap < 1: return data
+    if gap < 1: 
+         raise ValueError(f"Strict Mode: Gap must be >= 1 (Got {gap})")
     
     # Needs at least (2*gap + 1) bands
     if data.shape[1] < (2 * gap + 1):
-        print(f"Warning: Not enough bands for 3-Point Depth (Has {data.shape[1]}, Need {2*gap+1})")
-        return data
+        # AI가 수정함: 밴드 부족 시 에러 발생
+        raise ValueError(f"Strict Mode Error: Not enough bands for 3-Point Depth. Has {data.shape[1]}, Need {2*gap+1}.")
         
     L = data[:, :-2*gap]      # Left Shoulder
     C = data[:, gap:-gap]     # Center
