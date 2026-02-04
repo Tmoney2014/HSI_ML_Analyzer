@@ -66,7 +66,14 @@ class LearningService:
             log(f"   [SVM] Train: {train_acc*100:.2f}% | Test: {test_acc*100:.2f}% | Gap: {gap:.1f}%{gap_warning}")
             log(f"   [SVM] F1 (Macro): {f1:.3f}")
             
-            return model, test_acc
+            metrics = {
+                "TrainAccuracy": round(train_acc * 100, 2),
+                "TestAccuracy": round(test_acc * 100, 2),
+                "F1Score": round(f1, 4),
+                "TotalSamples": int(len(y)),
+                "TestSplit": test_ratio
+            }
+            return model, metrics
         except Exception as e:
             log(f"   [Error] SVM Training Failed: {e}")
             raise
@@ -90,7 +97,14 @@ class LearningService:
             log(f"   [LDA] Train: {train_acc*100:.2f}% | Test: {test_acc*100:.2f}% | Gap: {gap:.1f}%{gap_warning}")
             log(f"   [LDA] F1 (Macro): {f1:.3f}")
             
-            return model, test_acc
+            metrics = {
+                "TrainAccuracy": round(train_acc * 100, 2),
+                "TestAccuracy": round(test_acc * 100, 2),
+                "F1Score": round(f1, 4),
+                "TotalSamples": int(len(y)),
+                "TestSplit": test_ratio
+            }
+            return model, metrics
         except Exception as e:
             log(f"   [Error] LDA Training Failed: {e}")
             raise
@@ -181,7 +195,14 @@ class LearningService:
                  print("   [Warning] PLS Means not found. Assuming Zero Bias.")
                  model.export_intercept_ = np.zeros(n_targets_in)
             
-            return model, test_acc
+            metrics = {
+                "TrainAccuracy": round(train_acc * 100, 2),
+                "TestAccuracy": round(test_acc * 100, 2),
+                "F1Score": round(f1, 4),
+                "TotalSamples": int(len(y)),
+                "TestSplit": test_ratio
+            }
+            return model, metrics
             
         except Exception as e:
             print(f"   [Error] PLS-DA Training Failed: {e}")
@@ -189,13 +210,18 @@ class LearningService:
 
     # ----------------------------------------
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None, mean_spectrum=None, spa_scores=None):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None, mean_spectrum=None, spa_scores=None, metrics=None, model_name="model", description=""):
         """
         Export model to JSON for C#.
         Handles SVM, PLS-DA, and LDA (Linear Only).
+        Metrics: Optional performance dict from train_model
         """
         model_type_name = type(model).__name__
         
+        # AI가 추가함: Timestamp for Tracking
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         is_linear = True
         weights = []
         bias = []
@@ -280,12 +306,24 @@ class LearningService:
         
         required_raw_bands = set()
         
-        # Parameters
+        # Parameters (Strict Mode Validation)
         is_deriv = prep_flat.get("ApplyDeriv", False)
-        deriv_gap = prep_flat.get("Gap", 5)
+        
+        # 1. Check Deriv Gap
+        deriv_gap = 5 # Default
+        if is_deriv:
+            if "Gap" not in prep_flat:
+                 # 만약 UI가 Gap을 안 줬다면 에러
+                 raise ValueError("Export Error: 'Gap' parameter is missing for Derivative!")
+            deriv_gap = prep_flat["Gap"]
+        
         deriv_order = prep_flat.get("DerivOrder", 1)
         
         is_sg = prep_flat.get("ApplySG", False)
+        if is_sg and "SGWin" not in prep_flat:
+             # SG 사용 시 Win 필수
+             raise ValueError("Export Error: 'SGWin' parameter is missing for Savitzky-Golay!")
+             
         sg_win = prep_flat.get("SGWin", 5)
         sg_radius = sg_win // 2 if is_sg else 0
         
@@ -316,6 +354,9 @@ class LearningService:
         export_data = {
             "ModelType": "LinearModel", # Unified name
             "OriginalType": model_type_name,
+            "ModelName": model_name,    # AI가 추가함
+            "Description": description, # AI가 추가함
+            "Timestamp": timestamp, # AI가 추가함
             "SelectedBands": [int(b) for b in selected_bands],
             "RequiredRawBands": required_raw_bands_sorted,  # AI가 추가함: 런타임용 원본 밴드 목록
             "ExcludeBands": exclude_rules if exclude_rules else "",
@@ -324,7 +365,8 @@ class LearningService:
             "IsMultiClass": is_multiclass,
             "Preprocessing": prep_flat,
             "Labels": label_map if label_map else {"0": "Normal", "1": "Defect"},
-            "Colors": colors_map if colors_map else {"0": "#00FF00", "1": "#FF0000"}
+            "Colors": colors_map if colors_map else {"0": "#00FF00", "1": "#FF0000"},
+            "Performance": metrics # AI가 추가함: 모델 성적표
         }
         
         os.makedirs(os.path.dirname(output_path), exist_ok=True)

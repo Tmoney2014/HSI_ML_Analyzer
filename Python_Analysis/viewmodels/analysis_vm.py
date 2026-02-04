@@ -143,7 +143,10 @@ class AnalysisViewModel(QObject):
                     # Single: "92"
                     indices.add(int(p) - 1)
             except ValueError:
-                pass # Ignore bad input
+                # AI가 수정함: Strict Mode - 입력 에러 알림
+                msg = f"Invalid format in exclude bands: '{p}'. Use numbers or ranges (e.g. 1-10)."
+                self.error_occurred.emit(msg)
+                return [] # 중단
                 
         return list(indices)
         

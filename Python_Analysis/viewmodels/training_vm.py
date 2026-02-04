@@ -21,6 +21,7 @@ class TrainingViewModel(QObject):
     log_message = pyqtSignal(str)
     progress_update = pyqtSignal(int)
     training_finished = pyqtSignal(bool) # Success?
+    config_changed = pyqtSignal() # AI가 추가함: 설정 변경 시그널 (Auto-Save Trigger)
 
     def __init__(self, main_vm: MainViewModel, analysis_vm: AnalysisViewModel):
         super().__init__()
@@ -29,6 +30,18 @@ class TrainingViewModel(QObject):
         self.service = LearningService()
         self.optimizer = OptimizationService()
         self.optimizer.log_message.connect(self.log_message.emit)
+        
+        # AI가 추가함: Training State Variables (Source of Truth)
+        # 기본값은 default_project.json에서 덮어씌워지겠지만, 안전을 위해 초기화
+        self.output_folder = "./output"
+        self.model_name = "model"     # Default Filename
+        self.model_desc = ""          # Default Description
+        
+        self.output_path = None       # Deprecated (Computed Property로 대체)
+        
+        self.model_type = "Linear SVM"
+        self.val_ratio = 0.20
+        self.n_features = 5
         
         # Threading state
         self.worker_thread = None
@@ -46,6 +59,55 @@ class TrainingViewModel(QObject):
         self.main_vm.refs_changed.connect(self._invalidate_base_cache)
         self.main_vm.files_changed.connect(self._invalidate_base_cache)
         self.main_vm.mode_changed.connect(self._invalidate_base_cache)
+
+    @property
+    def full_output_path(self):
+        """Construct full path from folder and name"""
+        import os
+        filename = f"{self.model_name}.json"
+        return os.path.join(self.output_folder, filename).replace("/", "\\")
+
+    def get_config(self) -> dict:
+        """AI가 추가함: 현재 Training 설정을 Dict로 반환 (저장용)"""
+        return {
+            "output_folder": self.output_folder,
+            "model_name": self.model_name,
+            "model_desc": self.model_desc,
+            "model_type": self.model_type,
+            "val_ratio": self.val_ratio,
+            "n_features": self.n_features
+        }
+
+    def set_config(self, config: dict):
+        """AI가 추가함: Dict 설정값을 받아 상태 업데이트 (로드용)"""
+        if not config: return
+        
+        # 1. New Fields
+        if "output_folder" in config:
+            self.output_folder = config["output_folder"]
+            self.model_name = config.get("model_name", "model")
+            self.model_desc = config.get("model_desc", "")
+        else:
+            # 2. Backward Compatibility (Migration)
+            old_path = config.get("output_path", "./output/model_config.json")
+            if old_path:
+                folder = os.path.dirname(old_path)
+                filename = os.path.basename(old_path)
+                name, _ = os.path.splitext(filename)
+                
+                self.output_folder = folder if folder else "./output"
+                self.model_name = name if name else "model"
+                self.model_desc = "" # New field default
+        
+        self.model_type = config.get("model_type", "Linear SVM")
+        try:
+            self.val_ratio = float(config.get("val_ratio", 0.20))
+            self.n_features = int(config.get("n_features", 5))
+        except ValueError:
+            self.val_ratio = 0.20
+            self.n_features = 5
+            
+        self.config_changed.emit()
 
     def _invalidate_base_cache(self, *args):
         """Clear cached base data when settings change."""
@@ -109,10 +171,17 @@ class TrainingViewModel(QObject):
         s = json.dumps(config, sort_keys=True)
         return hashlib.md5(s.encode()).hexdigest()
 
-    def run_training(self, output_path: str, n_features: int = 5, internal_sim: bool = False, silent: bool = False, model_type: str = "Linear SVM", test_ratio: float = 0.2):
+    def run_training(self, output_path: Optional[str] = None, n_features: int = 0, internal_sim: bool = False, silent: bool = False, model_type: Optional[str] = None, test_ratio: float = 0.0):
         """
         Async Training Entry Point with Smart Caching.
+        If args are provided, they override VM state (but VM state is preferred from UI).
         """
+        # Fallback to VM State (Source of Truth)
+        if output_path is None: output_path = self.full_output_path # AI가 수정함: computed property 사용
+        if model_type is None: model_type = self.model_type
+        if n_features <= 0: n_features = self.n_features
+        if test_ratio <= 0.0: test_ratio = self.val_ratio
+
         if internal_sim:
              self.log_message.emit("Warning: internal_sim called on Async run_training.")
              return 0.0
@@ -135,7 +204,10 @@ class TrainingViewModel(QObject):
             'model_type': model_type,
             'test_ratio': test_ratio,
             'silent': silent,
-            'base_data_cache': self.cached_base_data  # 통합된 캐시
+            'base_data_cache': self.cached_base_data,  # 통합된 캐시
+            # AI가 추가함: Naming Metadata
+            'model_name': self.model_name,
+            'model_desc': self.model_desc
         }
         
         # 4. Create Thread
@@ -231,10 +303,17 @@ class TrainingViewModel(QObject):
             self.opt_worker.stop()
             self.log_message.emit("Stopping optimization...")
 
-    def run_optimization(self, output_path: str, model_type: str = "Linear SVM", test_ratio: float = 0.2, n_features: int = 5):
+    def run_optimization(self, output_path: Optional[str] = None, model_type: Optional[str] = None, test_ratio: float = 0.0, n_features: int = 0):
         """
         Orchestrate Auto-ML Optimization (Background).
+        Arguments are optional; if None, VM state is used.
         """
+        # Fallback to VM State (Source of Truth)
+        if output_path is None: output_path = self.full_output_path # AI가 수정함: computed property 사용
+        if model_type is None: model_type = self.model_type
+        if n_features <= 0: n_features = self.n_features
+        # Optimizer typically uses internal splitting, but we respect UI choices where applicable.
+        
         if self.analysis_vm is None: return
         
         # AI가 수정함: Thread 안전 정리 강화

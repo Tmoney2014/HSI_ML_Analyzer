@@ -152,7 +152,13 @@ class OptimizationWorker(QObject):
                         X_all.append(data)
                         y_all.append(np.full(data.shape[0], label_id))
                         class_pixels += data.shape[0]
-                except: pass
+                except Exception as e:
+                    # AI가 수정함: Strict Mode - 로드 에러 은폐 금지
+                    self.log_message.emit(f"Critical Error loading {f}: {e}")
+                    # 만약 하나라도 실패하면 전체 데이터 신뢰성 문제가 생기므로 중단하는 것이 맞음
+                    # 하지만 편의상 실패 파일만 스킵하고 로그를 남길 수도 있음.
+                    # Strict Mode 정책에 따라 여기서는 '실패'로 간주하고 False 리턴 (가장 안전)
+                    return False
             
             # AI가 수정함: 클래스별 로딩 완료 로그
             self.log_message.emit(f"  [{label_id+1}/{total_classes}] {class_name}: {class_pixels:,} pixels")
@@ -214,8 +220,9 @@ class OptimizationWorker(QObject):
         try:
             learning = LearningService()
             # If dataset is HUGE, this line will be the bottleneck in loop.
-            model, acc = learning.train_model(X_sub, y, model_type=self.model_type, test_ratio=0.2)
-            return acc * 100.0
+            model, metrics = learning.train_model(X_sub, y, model_type=self.model_type, test_ratio=0.2)
+            # metrics['TestAccuracy'] is already 0~100 scale float
+            return metrics['TestAccuracy']
         except:
             return 0.0
 

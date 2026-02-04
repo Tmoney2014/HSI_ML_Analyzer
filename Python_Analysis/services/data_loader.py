@@ -8,8 +8,8 @@ def load_hsi_data(header_path: str) -> tuple:
     Returns: (cube, wavelengths)
     """
     if not os.path.exists(header_path):
-        print(f"File not found: {header_path}, returning random data.")
-        return np.random.rand(100, 100, 224), [float(i) for i in range(224)]
+        # AI가 수정함: Strict Mode - 파일 없으면 에러 발생 (학습 데이터 오염 방지)
+        raise FileNotFoundError(f"HSI Data file not found: {header_path}")
         
     try:
         img = envi.open(header_path)

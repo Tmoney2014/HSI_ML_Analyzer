@@ -131,6 +131,17 @@ class ProcessingService:
         return flat_data, mask
 
     @staticmethod
+    def _req(params: dict, key: str, step_name: str):
+        """
+        /// <ai>AI가 작성함</ai>
+        Strict Param Getter.
+        If key is missing, raises ValueError instead of using default.
+        """
+        if key not in params:
+            raise ValueError(f"Strict Mode Error: Missing required param '{key}' in step '{step_name}'")
+        return params[key]
+
+    @staticmethod
     def apply_preprocessing_chain(flat_data, prep_chain):
         """
         Apply a list of preprocessing steps to flattened data (N, Bands).
@@ -139,20 +150,29 @@ class ProcessingService:
             name = step.get('name')
             p = step.get('params', {})
             
+            # AI가 수정함: Strict Mode 적용 (모든 파라미터 검증)
             if name == "SG": 
-                flat_data = processing.apply_savgol(flat_data, p.get('win', 4), p.get('poly', 1), p.get('deriv', 0))
+                flat_data = processing.apply_savgol(
+                    flat_data, 
+                    window_size=ProcessingService._req(p, 'win', 'SG'), 
+                    poly_order=ProcessingService._req(p, 'poly', 'SG'), 
+                    deriv=ProcessingService._req(p, 'deriv', 'SG')
+                )
             elif name == "SimpleDeriv": 
                 flat_data = processing.apply_simple_derivative(
                     flat_data, 
-                    gap=p.get('gap', 5), 
-                    order=p.get('order', 1), 
-                    apply_ratio=p.get('ratio', False), 
-                    ndi_threshold=p.get('ndi_threshold', 1e-4)
+                    gap=ProcessingService._req(p, 'gap', 'SimpleDeriv'), 
+                    order=ProcessingService._req(p, 'order', 'SimpleDeriv'), 
+                    apply_ratio=p.get('ratio', False), # ratio는 boolean flag라 optional 가능 (하지만 UI에서 반드시 줌)
+                    ndi_threshold=p.get('ndi_threshold', 1e-4) # Optional
                 )
             elif name == "SNV": 
                 flat_data = processing.apply_snv(flat_data)
             elif name == "3PointDepth": 
-                flat_data = processing.apply_rolling_3point_depth(flat_data, gap=p.get('gap', 5))
+                flat_data = processing.apply_rolling_3point_depth(
+                    flat_data, 
+                    gap=ProcessingService._req(p, 'gap', '3PointDepth')
+                )
             elif name == "L2": 
                 flat_data = processing.apply_l2_norm(flat_data)
             elif name == "MinSub": 

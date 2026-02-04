@@ -50,8 +50,13 @@ class TrainingWorker(QObject):
             output_path = self.params['output_path']
             n_features = self.params['n_features']
             model_type = self.params['model_type']
+            model_type = self.params['model_type']
             test_ratio = self.params['test_ratio']
             silent = self.params.get('silent', False)
+            
+            # AI가 추가함: Naming Metadata
+            model_name = self.params.get('model_name', 'model')
+            model_desc = self.params.get('model_desc', '')
             
             # Log Params
             self._log_configuration(silent, n_features)
@@ -60,7 +65,11 @@ class TrainingWorker(QObject):
             self.progress_update.emit(0)
             X, y, label_map, base_data_emitted = self._get_data_with_caching(silent)
             
-            if X is None or not self.is_running: return # Error or Stopped
+            if X is None or not self.is_running: 
+                # AI가 수정함: Deadlock 방지 - 로드 실패 시 반드시 종료 신호 전송
+                self.log_message.emit("Training Aborted or Data Load Failed.")
+                self.training_finished.emit(False)
+                return
 
             # AI가 수정함: Base Data 캐시 emit (전처리 전 데이터)
             if base_data_emitted:
@@ -116,14 +125,16 @@ class TrainingWorker(QObject):
             X_sub = X[:, selected_indices]
             service = LearningService()
             # AI가 수정함: 로그 콜백 연결 (UI 출력)
-            model, acc = service.train_model(
+            # AI가 수정함: 로그 콜백 연결 (UI 출력) 및 Metrics 수신
+            model, metrics = service.train_model(
                 X_sub, y, 
                 model_type=model_type, 
                 test_ratio=test_ratio,
                 log_callback=self.log_message.emit if not silent else None
             )
             
-            if not silent: self.log_message.emit(f"Training Accuracy: {acc*100:.2f}%")
+            acc = metrics['TestAccuracy']
+            if not silent: self.log_message.emit(f"Training Accuracy: {acc}%")
             self.progress_update.emit(100)
             
             # 5. Export
@@ -154,7 +165,12 @@ class TrainingWorker(QObject):
                 exclude_rules=self.exclude_bands_str, 
                 threshold=self.threshold,
                 mean_spectrum=mean_spec.tolist() if mean_spec is not None else None,
-                spa_scores=scores.tolist() if scores is not None else None
+                spa_scores=scores.tolist() if scores is not None else None,
+
+                metrics=metrics, # AI가 수정함: 성적표 전달
+                # AI가 추가함: Metadata
+                model_name=model_name,
+                description=model_desc
             )
             
             self.log_message.emit(f"Model exported to {output_path}")
