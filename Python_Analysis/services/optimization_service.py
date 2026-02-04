@@ -1,16 +1,14 @@
 from PyQt5.QtCore import QObject, pyqtSignal
-import copy # Added deepcopy
-from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
+import copy
+from config import get as cfg_get
 
 class OptimizationService(QObject):
     """
-    Service for Auto-ML Hyperparameter Optimization.
-    Implements 'Sequential Tuning' with 'Lookahead Hill Climbing' strategy.
-    
+    Service for Auto-ML Hyperparameter Optimization (Global Search).
+    Implements Grid Search for (Band Count x Gap Size) to find Global Optimum.
     Strategies:
-    1. Gap Size Tuning (SimpleDeriv / 3PointDepth)
-    2. NDI Threshold Tuning (If NDI enabled)
-    3. Band Count Tuning (SPA)
+    1. Global Grid Search: Band Count (5~40) x Gap Size (1~40)
+    2. Fine Tuning: NDI Threshold
     """
     log_message = pyqtSignal(str)
     
@@ -19,93 +17,87 @@ class OptimizationService(QObject):
         
     def run_optimization(self, initial_params, trial_callback):
         """
-        Run the full optimization sequence.
-        
-        Args:
-            initial_params (dict): Start parameters (from UI).
-            trial_callback (func): Function(params) -> accuracy (float 0-100).
-            
-        Returns:
-            dict: Best parameters found.
+        Run Global Optimization (Grid Search).
+        If no Gap-tunable preprocessing is found, runs Band-Only Optimization.
         """
+        self.log_message.emit("=== Starting Global Optimization (Grid Search) ===")
+        
+        # 0. Initialize
         best_params = copy.deepcopy(initial_params)
-        current_acc = trial_callback(best_params)
-        self.log_message.emit(f"Baseline Accuracy: {current_acc:.2f}%")
+        best_acc = 0.0
+        history = []
         
-        history = [(best_params.copy(), current_acc)]
+        # Target Preprocessing Steps for Gap Tuning
         target_keys = ["SimpleDeriv", "3PointDepth"]
+        target_prep_name = None
+        for step in best_params['prep']:
+            if step['name'] in target_keys:
+                target_prep_name = step['name']
+                break
         
-        # Phase 1: Gap Size
-        best_params, current_acc, target_prep = self._optimize_gap(
-            best_params, current_acc, history, trial_callback, target_keys
-        )
+        # 1. Setup Search Space
+        band_start, band_end, band_step = 5, 40, 5
         
-        # Phase 2: NDI Threshold
-        best_params, current_acc, ndi_step = self._optimize_ndi(
-            best_params, current_acc, history, trial_callback
-        )
+        if target_prep_name:
+            self.log_message.emit("Target: Find best combination of [Band Count] and [Gap Size]")
+            gap_range = range(1, 41) # Gap 1~40
+            self.log_message.emit(f"Search Space: Bands {band_start}~{band_end} x Gap 1~40 = ~320 trials")
+        else:
+            self.log_message.emit("⚠️ No Gap-tunable preprocessing found. Switching to [Band-Only Optimization].")
+            self.log_message.emit("Target: Find best [Band Count]")
+            gap_range = [0] # Dummy Gap (No change)
+            self.log_message.emit(f"Search Space: Bands {band_start}~{band_end}")
+
+        self.log_message.emit("-" * 40)
         
-        # Phase 3: Band Count
-        best_params, current_acc = self._optimize_bands(
-            best_params, current_acc, history, trial_callback
-        )
+        # 2. Optimization Loop
+        for n_features in range(band_start, band_end + 1, band_step):
+            self.log_message.emit(f"Checking Band Count: {n_features}...")
+            
+            for gap in gap_range:
+                # Construct Params
+                p = copy.deepcopy(initial_params)
+                p['n_features'] = n_features
+                
+                # Apply Gap (only if target exists)
+                if target_prep_name and gap > 0:
+                    for step in p['prep']:
+                        if step['name'] == target_prep_name:
+                            step['params']['gap'] = gap
+                            break
+                
+                # Evaluate
+                acc = trial_callback(p)
+                history.append((copy.deepcopy(p), acc))
+                
+                # Update Best
+                if acc > best_acc:
+                    diff = acc - best_acc
+                    best_acc = acc
+                    best_params = p
+                    msg = f"✨ New Best! {acc:.2f}% (+{diff:.2f}%) | Bands={n_features}"
+                    if target_prep_name: msg += f", Gap={gap}"
+                    self.log_message.emit(msg)
+                else:
+                     if target_prep_name:
+                         self.log_message.emit(f"   • Gap={gap}: {acc:.2f}%")
+                     else:
+                         self.log_message.emit(f"   • Bands={n_features}: {acc:.2f}%")
         
-        # Generate Report
-        self._generate_report(initial_params, best_params, current_acc, history, target_keys, target_prep, ndi_step)
+        self.log_message.emit("-" * 40)
+        self.log_message.emit(f"🏆 Optimization Done. Best: {best_acc:.2f}%")
+        
+        # 3. Phase 2: NDI Threshold Fine-Tuning (Local Search)
+        # Only if SimpleDeriv is used
+        best_params, best_acc, ndi_step = self._optimize_ndi(best_params, best_acc, history, trial_callback)
+        
+        # 4. Final Report
+        self._generate_report(best_params, best_acc, history)
         
         return best_params, history
-    
-    def _optimize_gap(self, best_params, current_acc, history, trial_callback, target_keys):
-        """Phase 1: Optimize Gap Size for SimpleDeriv or 3PointDepth."""
-        prep_chain = best_params.get('prep', [])
-        target_prep = None
-        for step in prep_chain:
-            if step['name'] in target_keys:
-                target_prep = step
-                break
-                
-        if not target_prep:
-            return best_params, current_acc, None
-            
-        self.log_message.emit(f"\n[Phase 1] Optimizing Gap Size for {target_prep['name']}...")
-        start_gap = target_prep['params'].get('gap', 1)
-        self.log_message.emit(f"   Start Gap: {start_gap}")
-        
-        # AI가 수정함: 전체 탐색 (1~40 일률 평가 후 최선 선택)
-        max_gap = 40
-        candidates = list(range(1, max_gap + 1))
-        self.log_message.emit(f"   🔍 전체 탐색: Gap 1~{max_gap}")
-        
-        best_gap = start_gap
-        best_gap_acc = current_acc
-        best_gap_params = best_params
-        
-        for gap_val in candidates:
-            p = copy.deepcopy(best_params)
-            for s in p['prep']:
-                if s['name'] == target_prep['name']:
-                    s['params']['gap'] = gap_val
-            acc = trial_callback(p)
-            history.append((copy.deepcopy(p), acc))
-            self.log_message.emit(f"    • Gap={gap_val}: {acc:.2f}%")
-            
-            if acc > best_gap_acc:
-                best_gap_acc = acc
-                best_gap = gap_val
-                best_gap_params = p
-        
-        # 최종 결과 로그
-        self.log_message.emit(f"   🏆 Best Gap: {best_gap} @ {best_gap_acc:.2f}%")
-        
-        if best_gap_acc > current_acc:
-            self.log_message.emit(f" -> Found Better Gap: {start_gap} -> {best_gap} (+{best_gap_acc - current_acc:.2f}%)")
-            return best_gap_params, best_gap_acc, target_prep
-        else:
-            self.log_message.emit(" -> No improvement on Gap.")
-            return best_params, current_acc, target_prep
-    
+
     def _optimize_ndi(self, best_params, current_acc, history, trial_callback):
-        """Phase 2: Optimize NDI Threshold if applicable."""
+        """Fine-tune NDI Threshold (Local Hill Climbing)."""
         ndi_step = None
         for step in best_params.get('prep', []):
             if step['name'] == "SimpleDeriv" and step['params'].get('ratio', False):
@@ -115,9 +107,8 @@ class OptimizationService(QObject):
         if not ndi_step:
             return best_params, current_acc, None
             
-        self.log_message.emit(f"\n[Phase 2] Optimizing NDI Threshold...")
+        self.log_message.emit(f"\n[Final Phase] Fine-tuning NDI Threshold...")
         start_th = ndi_step['params'].get('ndi_threshold', 1000.0)
-        if start_th < 1: start_th = 50
         self.log_message.emit(f"   Start Threshold: {start_th}")
         
         def ndi_evaluator(val):
@@ -129,9 +120,10 @@ class OptimizationService(QObject):
             history.append((copy.deepcopy(p), acc))
             return acc, p
 
+        # Local Search (Hill Climbing)
         best_th, th_acc, best_p_th = self.lookahead_hill_climbing(
             start_val=start_th,
-            step=cfg_get('optimization', 'ndi_step', 100),  # AI가 수정함
+            step=cfg_get('optimization', 'ndi_step', 100),
             lookahead=cfg_get('optimization', 'ndi_lookahead', 3),
             max_val=cfg_get('optimization', 'ndi_max_val', 2000),
             evaluator=ndi_evaluator, initial_acc=current_acc, initial_params_obj=best_params
@@ -143,58 +135,40 @@ class OptimizationService(QObject):
         else:
             self.log_message.emit(" -> No improvement on Threshold.")
             return best_params, current_acc, ndi_step
-    
-    def _optimize_bands(self, best_params, current_acc, history, trial_callback):
-        """Phase 3: Optimize Feature Count (Band Selection)."""
-        self.log_message.emit(f"\n[Phase 3] Optimizing Feature Count (Bands)...")
-        start_features = best_params.get('n_features', 5)
-        self.log_message.emit(f"   Start Features: {start_features}")
-        
-        def band_evaluator(val):
-            p = copy.deepcopy(best_params)
-            p['n_features'] = val
-            acc = trial_callback(p)
-            history.append((copy.deepcopy(p), acc))
-            return acc, p
-            
-        best_bands, band_acc, best_p_band = self.lookahead_hill_climbing(
-            start_val=start_features, step=5, lookahead=3, max_val=40,
-            evaluator=band_evaluator, initial_acc=current_acc, initial_params_obj=best_params
-        )
-        
-        if band_acc > current_acc:
-            self.log_message.emit(f" -> Found Better Band Count: {start_features} -> {best_bands} (+{band_acc - current_acc:.2f}%)")
-            return best_p_band, band_acc
-        return best_params, current_acc
-    
-    def _generate_report(self, initial_params, best_params, current_acc, history, target_keys, target_prep, ndi_step):
-        """Generate final optimization report."""
-        report = ["\n🎉 Optimization Completed!", "-" * 40, "[Change Log]"]
-        
-        # 1. Gap
-        if target_prep:
-            init_gap = next((s['params'].get('gap', 5) for s in initial_params['prep'] if s['name'] in target_keys), 5)
-            final_gap = next((s['params'].get('gap', 5) for s in best_params['prep'] if s['name'] in target_keys), 5)
-            change = f"{init_gap} -> {final_gap}" if init_gap != final_gap else f"{init_gap} (No Change)"
-            report.append(f"1. Gap Size: {change}")
 
-        # 2. Threshold
-        if ndi_step:
-            init_th = next((s['params'].get('ndi_threshold', 0) for s in initial_params['prep'] if s['name'] == "SimpleDeriv"), 0)
-            final_th = next((s['params'].get('ndi_threshold', 0) for s in best_params['prep'] if s['name'] == "SimpleDeriv"), 0)
-            change = f"{init_th} -> {final_th}" if init_th != final_th else f"{init_th} (No Change)"
-            report.append(f"2. NDI Threshold: {change}")
-                 
-        # 3. Bands
-        init_bands = initial_params.get('n_features', 5)
-        final_bands = best_params.get('n_features', 5)
-        change = f"{init_bands} -> {final_bands}" if init_bands != final_bands else f"{init_bands} (No Change)"
-        report.append(f"3. Band Count: {change}")
-             
+    def _generate_report(self, best_params, current_acc, history):
+        """Generate final optimization report."""
+        report = ["\n🎉 Optimization Completed!", "-" * 40, "[Final Configuration]"]
+        
+        target_keys = ["SimpleDeriv", "3PointDepth"]
+        for step in best_params['prep']:
+            if step['name'] in target_keys:
+                report.append(f" • Gap Size: {step['params'].get('gap')}")
+            if step['name'] == "SimpleDeriv" and step['params'].get('ratio'):
+                 report.append(f" • NDI Threshold: {step['params'].get('ndi_threshold')}")
+
+        report.append(f" • Band Count: {best_params.get('n_features')}")
         report.extend(["-" * 40, f"🏆 Final Best Accuracy: {current_acc:.2f}%", "-" * 40, "📜 Top 3 Configurations"])
         
-        sorted_history = sorted(history, key=lambda x: x[1], reverse=True)[:3]
-        for i, (p, acc) in enumerate(sorted_history):
+        # Sort by Accuracy
+        sorted_history = sorted(history, key=lambda x: x[1], reverse=True)
+        
+        # Deduplicate (Params can be same)
+        seen = set()
+        unique_top = []
+        for p, acc in sorted_history:
+            # Create hashable signature
+            sig = (p['n_features'],)
+            for s in p['prep']:
+                if s['name'] in target_keys: sig += (s['params'].get('gap'),)
+                if s['name'] == "SimpleDeriv" and s['params'].get('ratio'): sig += (s['params'].get('ndi_threshold'),)
+            
+            if sig not in seen:
+                seen.add(sig)
+                unique_top.append((p, acc))
+            if len(unique_top) >= 3: break
+            
+        for i, (p, acc) in enumerate(unique_top):
             info = [f"Bands={p['n_features']}"]
             for s in p['prep']:
                 if s['name'] in target_keys: info.append(f"Gap={s['params'].get('gap')}")
@@ -205,23 +179,8 @@ class OptimizationService(QObject):
         self.log_message.emit("\n".join(report))
 
     def lookahead_hill_climbing(self, start_val, step, lookahead, max_val, evaluator, initial_acc=None, initial_params_obj=None):
-        """
-        Generic Lookahead Walker.
-        Args:
-            start_val: Initial numeric value
-            step: Increment step
-            lookahead: How many steps to check ahead
-            max_val: Limit
-            evaluator: Func(val) -> (accuracy, full_params)
-            initial_acc: Optional, accuracy at start_val if already known
-            initial_params_obj: Optional, params object at start_val if already known
-        
-        Returns:
-            (best_val, best_acc, best_params_obj)
-        """
+        """Generic Lookahead Walker."""
         current_val = start_val
-        
-        # Avoid Redundant Calculation if passed
         if initial_acc is not None and initial_params_obj is not None:
              current_acc = initial_acc
              current_full_params = initial_params_obj
@@ -229,7 +188,6 @@ class OptimizationService(QObject):
              current_acc, current_full_params = evaluator(current_val)
         
         while True:
-            # Lookahead check
             found_better = False
             local_best_val = current_val
             local_best_acc = current_acc
@@ -241,14 +199,13 @@ class OptimizationService(QObject):
                 if next_val > max_val: break
                 candidates.append(next_val)
                 
-            if not candidates: break # Hit max
+            if not candidates: break
             
-            self.log_message.emit(f"   👀 Lookahead: {candidates} (Baseline: {current_val} @ {current_acc:.2f}%)")
+            self.log_message.emit(f"   👀 Fine-tuning Lookahead: {candidates}")
             
             for val in candidates:
                 acc, p_obj = evaluator(val)
-                # Conciseness: Use Bullet
-                self.log_message.emit(f"    • Val={val}: {acc:.2f}%")
+                # self.log_message.emit(f"    • Val={val}: {acc:.2f}%") # Too verbose?
                 if acc > local_best_acc:
                     local_best_acc = acc
                     local_best_val = val
@@ -256,14 +213,11 @@ class OptimizationService(QObject):
                     found_better = True
             
             if found_better:
-                # Move to the new best position
                 self.log_message.emit(f"   🚀 Jump to {local_best_val} ({local_best_acc:.2f}%)")
                 current_val = local_best_val
                 current_acc = local_best_acc
                 current_full_params = local_best_params
-                # Continue loop to lookahead again from new position
             else:
-                # No improvement in lookahead window -> Stop
                 break
                 
         return current_val, current_acc, current_full_params

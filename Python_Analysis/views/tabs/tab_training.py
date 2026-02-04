@@ -93,8 +93,9 @@ class TabTraining(QWidget):
         # Extract Params
         model_type = self.combo_model.currentText()
         ratio = self.spin_ratio.value()
+        n_features = self.spin_bands.value() # AI가 수정함: UI Band 수 적용
         
-        self.vm.run_optimization(output_path, model_type=model_type, test_ratio=ratio)
+        self.vm.run_optimization(output_path, model_type=model_type, test_ratio=ratio, n_features=n_features)
         
     def set_buttons_enabled(self, enabled):
         self.btn_train.setEnabled(enabled)

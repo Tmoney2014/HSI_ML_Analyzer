@@ -231,7 +231,7 @@ class TrainingViewModel(QObject):
             self.opt_worker.stop()
             self.log_message.emit("Stopping optimization...")
 
-    def run_optimization(self, output_path: str, model_type: str = "Linear SVM", test_ratio: float = 0.2):
+    def run_optimization(self, output_path: str, model_type: str = "Linear SVM", test_ratio: float = 0.2, n_features: int = 5):
         """
         Orchestrate Auto-ML Optimization (Background).
         """
@@ -255,7 +255,7 @@ class TrainingViewModel(QObject):
             
         initial_params = {
             'prep': prep_chain_copy,
-            'n_features': 5,
+            'n_features': n_features, # AI가 수정함: UI 값 사용
         }
         
         # 3. Create Worker & Thread
