@@ -164,6 +164,14 @@ class MainWindow(QMainWindow):
             self.main_vm.reset_session()
             self._load_template() # AI가 수정함: 템플릿 로드
             
+            # AI가 추가함: UI 강제 리셋 (중요)
+            if hasattr(self, 'tab_data'):
+                self.tab_data.restore_ui()
+            if hasattr(self, 'tab_analysis'):
+                self.tab_analysis.restore_ui()
+            if hasattr(self, 'tab_training'):
+                self.tab_training.init_from_vm_state()
+            
             # Set path and perform initial save
             self.main_vm.current_project_path = f
             self._do_save(f)

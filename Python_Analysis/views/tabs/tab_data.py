@@ -403,3 +403,15 @@ class TabData(QWidget):
     def _refresh_refs(self):
         self.txt_white.setText(self.vm.white_ref)
         self.txt_dark.setText(self.vm.dark_ref)
+
+    def restore_ui(self):
+        """AI가 추가함: UI 초기화 및 VM 상태 복원"""
+        self._refresh_lists()
+        self._refresh_refs()
+        
+        # Processing Mode Reset
+        if hasattr(self, 'radio_ref'):
+            pm = self.vm.processing_mode
+            if pm == "Reflectance": self.radio_ref.setChecked(True)
+            elif pm == "Absorbance": self.radio_abs.setChecked(True)
+            else: self.radio_raw.setChecked(True)
