@@ -1,8 +1,10 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QProgressBar, 
                              QTextEdit, QLabel, QGroupBox, QHBoxLayout, QLineEdit,
-                             QComboBox, QDoubleSpinBox, QSpinBox, QFileDialog)
-from PyQt5.QtCore import Qt
+                             QComboBox, QDoubleSpinBox, QSpinBox, QFileDialog, QSplitter,
+                             QTreeWidget, QTreeWidgetItem)
+from PyQt5.QtCore import Qt, pyqtSignal
 from viewmodels.training_vm import TrainingViewModel
+import os
 
 class TabTraining(QWidget):
     def __init__(self, training_vm: TrainingViewModel):
@@ -18,8 +20,10 @@ class TabTraining(QWidget):
         layout = QVBoxLayout(self)
         
         grp_idx = QGroupBox("Training Configuration")
+        # AI가 수정함: 다시 수직(VBox) 배치로 복귀하되, 간격(Spacing)을 줄임
         vbox = QVBoxLayout()
-        vbox.addWidget(QLabel("Configure your Machine Learning Model:"))
+        vbox.setSpacing(2)  # 항목 간 간격을 2px로 좁힘
+        vbox.setContentsMargins(5, 10, 5, 5) # 여백 조정
         
         # 1. Model Selection
         hbox_model = QHBoxLayout()
@@ -34,20 +38,20 @@ class TabTraining(QWidget):
         hbox_split = QHBoxLayout()
         hbox_split.addWidget(QLabel("Validation Ratio:"))
         self.spin_ratio = QDoubleSpinBox()
-        self.spin_ratio.setRange(0.05, 0.50) # 5% to 50%
+        self.spin_ratio.setRange(0.05, 0.50)
         self.spin_ratio.setSingleStep(0.05)
-        self.spin_ratio.setValue(0.20) # Default 20%
+        self.spin_ratio.setValue(0.20)
         self.spin_ratio.setToolTip("Proportion of data used for validation (Test Set).")
         hbox_split.addWidget(self.spin_ratio)
         vbox.addLayout(hbox_split)
         
 
-        # 3. Output Configuration (Split into Folder, Name, Desc)
+        # 3. Output Configuration
         # 3-1. Folder
         hbox_folder = QHBoxLayout()
         hbox_folder.addWidget(QLabel("Output Folder:"))
         self.txt_folder = QLineEdit("./output")
-        self.txt_folder.setReadOnly(True) # Browse로만 변경 권장
+        self.txt_folder.setReadOnly(True)
         hbox_folder.addWidget(self.txt_folder)
         
         self.btn_browse = QPushButton("...")
@@ -72,7 +76,7 @@ class TabTraining(QWidget):
         hbox_desc.addWidget(self.txt_desc)
         vbox.addLayout(hbox_desc)
         
-        # New: Dynamic Band Selection
+        # 4. Bands
         hbox_bands = QHBoxLayout()
         hbox_bands.addWidget(QLabel("Number of Bands (Features):"))
         self.spin_bands = QSpinBox()
@@ -83,9 +87,45 @@ class TabTraining(QWidget):
         vbox.addLayout(hbox_bands)
         
         grp_idx.setLayout(vbox)
-        layout.addWidget(grp_idx)
         
-        # Buttons Layout
+        # AI가 수정함: 상단 설정창은 높이 고정 (늘어나지 않음)
+        from PyQt5.QtWidgets import QSizePolicy
+        grp_idx.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        
+        layout.addWidget(grp_idx, 0) # Stretch = 0 (Do not expand)
+        
+        # Splitter (Left: Data Tree | Right: Log)
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Left Panel: File Selection Tree
+        left_widget = QWidget()
+        vbox_left = QVBoxLayout(left_widget)
+        vbox_left.setContentsMargins(0, 0, 0, 0)
+        vbox_left.addWidget(QLabel("Training Data Selection:"))
+        
+        self.tree_files = QTreeWidget()
+        self.tree_files.setHeaderLabel("Groups / Files")
+        self.tree_files.itemChanged.connect(self.on_tree_item_changed) # Checkbox Handler
+        vbox_left.addWidget(self.tree_files)
+        
+        splitter.addWidget(left_widget)
+        
+        # Right Panel: Log (Expanded)
+        right_widget = QWidget()
+        vbox_right = QVBoxLayout(right_widget)
+        vbox_right.setContentsMargins(0, 0, 0, 0)
+        vbox_right.addWidget(QLabel("Training Log:"))
+        
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setStyleSheet("background-color: #1e1e1e; color: #00FF00; font-family: Consolas; font-size: 11pt;")
+        vbox_right.addWidget(self.log_text)
+        
+        splitter.addWidget(right_widget)
+        splitter.setSizes([300, 700]) # Ratio
+        layout.addWidget(splitter, 1) # Stretch = 1 (Expand to fill bottom)
+        
+        # Buttons Layout (Bottom)
         hbox_btns = QHBoxLayout()
         
         self.btn_train = QPushButton("Train (Normal)")
@@ -93,28 +133,20 @@ class TabTraining(QWidget):
         self.btn_train.clicked.connect(self.on_start_click)
         hbox_btns.addWidget(self.btn_train)
         
-        self.btn_optimize = QPushButton("Find Params (No Save)") # AI가 수정함: 사용자 요청 반영
-        self.btn_optimize.setToolTip("Run Auto-Optimization to find best parameters. Model is NOT saved.")
+        self.btn_optimize = QPushButton("Find Params (No Save)") 
+        self.btn_optimize.setToolTip("Run Auto-Optimization (using ONLY checked files).")
         self.btn_optimize.setStyleSheet("background-color: #9C27B0; color: white; font-size: 14px; font-weight: bold; height: 40px;")
         self.btn_optimize.clicked.connect(self.on_optimize_click)
         hbox_btns.addWidget(self.btn_optimize)
         
         layout.addLayout(hbox_btns)
         
-        self.progress = QProgressBar()
-        layout.addWidget(self.progress)
-        
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setStyleSheet("background-color: #333; color: #0f0; font-family: Consolas;")
-        layout.addWidget(self.log_text)
-        
         # AI가 추가함: UI 이벤트 연결
         self.connect_ui_events()
 
     def connect_signals(self):
         self.vm.log_message.connect(self.append_log)
-        self.vm.progress_update.connect(self.progress.setValue)
+        # self.vm.progress_update.connect(self.progress.setValue) # ProgressBar Removed
         self.vm.training_finished.connect(self.on_finished)
 
     def on_optimize_click(self):
@@ -166,6 +198,61 @@ class TabTraining(QWidget):
             self.spin_bands.setValue(self.vm.n_features)
         finally:
             self.blockSignals(False)
+            
+        # Refresh Tree (Data Sync)
+        self.refresh_file_tree()
+
+    def refresh_file_tree(self):
+        """MainVM의 그룹/파일 정보를 트리 위젯에 표시 및 TrainingVM의 excluded 상태 반영"""
+        self.tree_files.blockSignals(True)
+        self.tree_files.clear()
+        
+        excluded = self.vm.excluded_files
+        
+        # 1. Groups
+        for group_name, files in self.vm.main_vm.file_groups.items():
+            if not files: continue
+            
+            grp_item = QTreeWidgetItem([group_name])
+            grp_item.setFlags(grp_item.flags() | Qt.ItemIsTristate | Qt.ItemIsUserCheckable)
+            grp_item.setCheckState(0, Qt.Checked) # Default to Checked
+            grp_item.setExpanded(True)
+            self.tree_files.addTopLevelItem(grp_item)
+            
+            all_unchecked = True
+            
+            # 2. Files
+            for f in files:
+                # AI가 수정함: 상위 디렉터리 포함 (Parent/Filename)
+                parent_dir = os.path.basename(os.path.dirname(f))
+                fname = os.path.basename(f)
+                display_name = f"{parent_dir}/{fname}"
+                
+                file_item = QTreeWidgetItem([display_name])
+                file_item.setFlags(file_item.flags() | Qt.ItemIsUserCheckable)
+                file_item.setData(0, Qt.UserRole, f) # Store full path
+                
+                if f in excluded:
+                    file_item.setCheckState(0, Qt.Unchecked)
+                else:
+                    file_item.setCheckState(0, Qt.Checked)
+                    all_unchecked = False
+                    
+                grp_item.addChild(file_item)
+            
+            # Update Group Check State based on children
+            if all_unchecked:
+                grp_item.setCheckState(0, Qt.Unchecked)
+            # Tristate handles Partial automatically usually, but let's leave it to Qt
+            
+        self.tree_files.blockSignals(False)
+
+    def on_tree_item_changed(self, item, column):
+        """체크박스 변경 시 VM에 알림"""
+        path = item.data(0, Qt.UserRole)
+        if path: # It's a file
+            is_checked = (item.checkState(0) == Qt.Checked)
+            self.vm.set_file_excluded(path, not is_checked) # excluded = NOT checked
 
     def _on_ui_changed(self):
         """AI가 수정함: UI 변경 시 VM 업데이트 -> config_changed -> AutoSave"""

@@ -51,7 +51,11 @@ class TrainingViewModel(QObject):
         self.opt_worker = None
         
         # AI가 수정함: 캐시 구조 통합 - Base Data만 캐시 (전처리 전)
-        self.cached_base_data = None  # (X_base, y) - Raw/Ref + Masking, NO Preprocessing
+        # Dictionary Cache: {file_path: (X_base, y)} for selective training
+        self.cached_base_data = {}  
+        
+        # AI가 추가함: 제외할 파일 목록
+        self.excluded_files = set()
         
         # Cache Invalidation: When underlying data changes, clear caches
         # AI가 수정함: params_changed 대신 base_data_invalidated 연결 (Gap 변경 시 무효화 방지)
@@ -75,7 +79,9 @@ class TrainingViewModel(QObject):
             "model_desc": self.model_desc,
             "model_type": self.model_type,
             "val_ratio": self.val_ratio,
-            "n_features": self.n_features
+            "n_features": self.n_features,
+            # AI가 추가함: 제외 목록 저장 (list로 변환)
+            "excluded_files": list(self.excluded_files)
         }
 
     def set_config(self, config: dict):
@@ -107,14 +113,28 @@ class TrainingViewModel(QObject):
             self.val_ratio = 0.20
             self.n_features = 5
             
+        # AI가 추가함: 제외 목록 복원
+        if "excluded_files" in config:
+            self.excluded_files = set(config["excluded_files"])
+        else:
+            self.excluded_files = set()
+            
+        self.config_changed.emit()
+
+    def set_file_excluded(self, path: str, excluded: bool):
+        """AI가 추가함: 파일 제외 여부 토글 (캐시 유지)"""
+        if excluded:
+            self.excluded_files.add(path)
+        else:
+            self.excluded_files.discard(path)
         self.config_changed.emit()
 
     def _invalidate_base_cache(self, *args):
         """Clear cached base data when settings change."""
-        # AI가 수정함: 캐시 통합으로 간소화
-        if self.cached_base_data is not None:
-            self.cached_base_data = None
-            self.log_message.emit("⚠️ Settings Changed: Base Data Cache Invalidated.")
+        # AI가 수정함: 캐시 통합으로 간소화 (Dict 초기화)
+        if self.cached_base_data:
+            self.cached_base_data = {}
+            self.log_message.emit("⚠️ Settings Changed: Base Data Cache Cleared.")
 
     def _ensure_ref_loaded(self):
         """
@@ -207,7 +227,9 @@ class TrainingViewModel(QObject):
             'base_data_cache': self.cached_base_data,  # 통합된 캐시
             # AI가 추가함: Naming Metadata
             'model_name': self.model_name,
-            'model_desc': self.model_desc
+            'model_desc': self.model_desc,
+            # AI가 추가함: 제외 목록 전달
+            'excluded_files': self.excluded_files.copy()
         }
         
         # 4. Create Thread
@@ -280,13 +302,14 @@ class TrainingViewModel(QObject):
         from PyQt5.QtCore import QTimer
         QTimer.singleShot(100, self._on_thread_stopped)
         
-    def on_base_data_ready(self, X, y):
+    def on_base_data_ready(self, file_path, data_tuple):
         """
-        AI가 수정함: 캐시 구조 통합
+        AI가 수정함: 캐시 구조 통합 (Dict Update)
         Slot to receive Base Data (NO Preprocessing) for caching.
         """
-        self.cached_base_data = (X, y)
-        self.log_message.emit("✅ Base Data Cached (Reusable for Training & Optimization).")
+        if file_path and data_tuple is not None:
+            self.cached_base_data[file_path] = data_tuple
+            # self.log_message.emit(f"✅ Cached data for {os.path.basename(file_path)}")
             
     def on_worker_finished(self, success):
         self.training_finished.emit(success)
@@ -335,6 +358,8 @@ class TrainingViewModel(QObject):
         initial_params = {
             'prep': prep_chain_copy,
             'n_features': n_features, # AI가 수정함: UI 값 사용
+            # AI가 추가함: 제외 목록 전달
+            'excluded_files': self.excluded_files.copy()
         }
         
         # 3. Create Worker & Thread
@@ -403,9 +428,9 @@ class TrainingViewModel(QObject):
                 self.analysis_vm.set_preprocessing_chain(best_params['prep'])
                 self.best_n_features = best_params.get('n_features', 5)
             
-            if hasattr(self.opt_worker, 'cached_X') and self.opt_worker.cached_X is not None:
-                self.cached_base_data = (self.opt_worker.cached_X, self.opt_worker.cached_y)
-                self.log_message.emit("✅ Optimization Cache Saved (Masked Data Valid).")
+            # AI가 수정함: 캐시 덮어쓰기 삭제 (Dict 유지)
+            # OptimizationWorker는 파일별로 base_data_ready를 방출하므로 자동 캐싱됨.
+            # 여기서 self.opt_worker.cached_X를 덮어쓰면 Tuple이 되어 구조가 망가짐.
         
         # 2. 외부에 결과 알림
         self.training_finished.emit(success)
