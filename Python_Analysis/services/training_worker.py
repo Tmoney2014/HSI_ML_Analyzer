@@ -41,6 +41,9 @@ class TrainingWorker(QObject):
         
         # AI가 수정함: 색상 맵 저장
         self.colors_map = colors_map
+        
+        # AI가 추가함: 제외 파일 목록
+        self.excluded_files = params.get('excluded_files', set())
 
     def run(self):
         try:
@@ -71,9 +74,10 @@ class TrainingWorker(QObject):
                 self.training_finished.emit(False)
                 return
 
-            # AI가 수정함: Base Data 캐시 emit (전처리 전 데이터)
-            if base_data_emitted:
-                self.base_data_ready.emit(base_data_emitted[0], base_data_emitted[1])
+                self.training_finished.emit(False)
+                return
+            
+            # AI가 수정함: emit removed here, individual updates happen in _load_loop
 
             self.progress_update.emit(60)
 
@@ -191,11 +195,13 @@ class TrainingWorker(QObject):
         EXCLUDED_NAMES = ["-", "unassigned", "trash", "ignore"]
         valid_cnt = 0
         for name, files in self.file_groups.items():
-            if len(files) > 0 and name.lower() not in EXCLUDED_NAMES:
+            # AI가 수정함: 제외된 파일 고려하여 유효 클래스 판단
+            active_files = [f for f in files if f not in self.excluded_files]
+            if len(active_files) > 0 and name.lower() not in EXCLUDED_NAMES:
                 valid_cnt += 1
         
         if valid_cnt < 2:
-            self.log_message.emit("Error: Need at least 2 valid classes for training!")
+            self.log_message.emit("Error: Need at least 2 valid classes (with active files) for training!")
             self.training_finished.emit(False)
             return False
         return True
@@ -232,30 +238,27 @@ class TrainingWorker(QObject):
         for label_id, (class_name, _) in enumerate(valid_groups.items()):
             label_map[label_id] = class_name
 
-        # 1. Cache Hit Path (Base Data 캐시 있음 → 전처리만 적용)
-        if self.base_data_cache is not None:
-             if not silent: self.log_message.emit("⚡ Base Data Cache Hit! Reusing masked data, applying preprocessing...")
-             X_base, y_base = self.base_data_cache
-             
-             X = ProcessingService.apply_preprocessing_chain(X_base, self.prep_chain)
-             return X, y_base, label_map, None  # 캐시 사용 → emit 안함
-
-        # 2. Cache Miss Path (파일 로드 → Base Data 생성 → 전처리 적용)
-        if not silent: self.log_message.emit("Starting File Loading & Processing...")
-        X_base, y = self._load_and_process_base_data(valid_groups, silent)
+        # 2. Smart Data Loading (Dict Cache Aware)
+        # AI가 수정함: 통합 로직 - 캐시 있으면 쓰고 없으면 로드
+        if not silent: self.log_message.emit("Starting Data Loader...")
+        
+        # We assume base_data_cache is a Dict {path: (X_b, y)} or None
+        # But we made it {} in VM.
+        if self.base_data_cache is None: self.base_data_cache = {}
+        
+        X_base, y = self._load_and_process_base_data_smart(valid_groups, silent)
         
         if X_base is None:
             return None, None, label_map, None
         
-        # 전처리 적용
+        # 전처리 적용 (Combined X_base)
         X = ProcessingService.apply_preprocessing_chain(X_base, self.prep_chain)
         
-        return X, y, label_map, (X_base, y)  # 새 Base Data → emit
+        return X, y, label_map, None 
 
-    def _load_and_process_base_data(self, valid_groups, silent):
+    def _load_and_process_base_data_smart(self, valid_groups, silent):
         """
-        AI가 수정함: Base Data만 반환 (전처리는 호출자에서 적용)
-        Returns (X_base, y) - NO Preprocessing applied.
+        AI가 수정함: Smart Loading with Dictionary Cache & Exclusion
         """
         X_all = []
         y_all = []
@@ -264,38 +267,85 @@ class TrainingWorker(QObject):
         processed_cnt = 0
         
         for label_id, (class_name, files) in enumerate(valid_groups.items()):
-            if not silent: self.log_message.emit(f"Processing Class '{class_name}' (ID={label_id})...")
+            if not silent: self.log_message.emit(f"Processing Class '{class_name}'...")
             
-            for f in files:
+            # AI가 수정함: 파일 로딩 순서 고정 (재현성 보장)
+            sorted_files = sorted(files)
+            for f in sorted_files:
                 if not self.is_running: return None, None
                 
-                try:
-                    # Thread-Safe File Cache Check
-                    if f in self.data_cache:
-                        cube, waves = self.data_cache[f]
-                    else:
-                        cube, waves = load_hsi_data(f)
-                        cube = np.nan_to_num(cube)
-                        self.data_cache[f] = (cube, waves)
+                # 1. Check Exclusion
+                if f in self.excluded_files:
+                    if not silent: self.log_message.emit(f"   [Skip] '{os.path.basename(f)}' (Excluded)")
+                    processed_cnt += 1
+                    continue
+                
+                # 2. Check Base Data Cache (Dict)
+                if f in self.base_data_cache:
+                    # Cache Hit
+                    # if not silent: self.log_message.emit(f"   [Cache] '{os.path.basename(f)}'")
+                    data_base, mask = self.base_data_cache[f]  # (X, mask) ?? No, (X_base, y) stored?
+                    # Wait, VM stores (X_base, y) or (X_base, mask)?
+                    # TrainingWorker.base_data_ready emits (X, y)? 
+                    # Let's verify what we emit. We emit (X_base, y_chunk). OK.
+                    X_chunk = data_base
+                    # y_chunk is implicitly label_id? No, stored y might have labels.
+                    # Warning: stored y has fixed label_id. If Group Name changes -> Label ID changes.
+                    # So we should NOT rely on cached Y if Group mapping changed.
+                    # But cached X is fine.
                     
-                    cube = np.nan_to_num(cube)
+                    # Correction: We only cache X_base (Masked Data). 
+                    # Recalculating Y is cheap.
+                    # Check original emit logic:
+                    # self.base_data_ready.emit(X_base, y)
+                    # So we cached Y too.
+                    # Re-labeling is safer.
                     
-                    # Get Base Data (Reflectance + Masked, NO Preprocessing)
-                    data_base, mask = ProcessingService.get_base_data(
-                        cube,
-                        mode=self.processing_mode,
-                        threshold=self.threshold,
-                        mask_rules=self.mask_rules,
-                        white_ref=self.white_ref,
-                        dark_ref=self.dark_ref
-                    )
+                    # Update: Let's trust X_base. We recreate y based on current label_id.
                     
-                    if data_base.shape[0] > 0:
-                        X_all.append(data_base)
-                        y_all.append(np.full(data_base.shape[0], label_id))
+                    X_file = data_base # (Pixels, Bands)
+                else:
+                    # Cache Miss - Load & Process
+                    display_name = f"{os.path.basename(os.path.dirname(f))}/{os.path.basename(f)}"
+                    if not silent: self.log_message.emit(f"   [Load] '{display_name}'")
+                    try:
+                        # File Load (Raw)
+                        if f in self.data_cache:
+                            cube, waves = self.data_cache[f]
+                        else:
+                            cube, waves = load_hsi_data(f)
+                            cube = np.nan_to_num(cube)
+                            self.data_cache[f] = (cube, waves)
                         
-                except Exception as e:
-                    if not silent: self.log_message.emit(f"Error processing {f}: {e}")
+                        cube = np.nan_to_num(cube)
+                        
+                        # Apply Masking (Base Data)
+                        X_file, mask = ProcessingService.get_base_data(
+                            cube,
+                            mode=self.processing_mode,
+                            threshold=self.threshold,
+                            mask_rules=self.mask_rules,
+                            white_ref=self.white_ref,
+                            dark_ref=self.dark_ref
+                        )
+                        
+                        # Update Cache (Emit)
+                        try:
+                            if X_file.shape[0] > 0:
+                                # self.log_message.emit(f"Emitting data for {os.path.basename(f)}")
+                                self.base_data_ready.emit(f, (X_file, None)) 
+                        except Exception as ex:
+                            self.log_message.emit(f"Emit Failed for {f}: {ex}")
+                            raise ex
+                            
+                    except Exception as e:
+                        if not silent: self.log_message.emit(f"Error processing {f}: {e}")
+                        X_file = np.empty((0, 1))
+
+                # Append to Batch
+                if X_file.shape[0] > 0:
+                    X_all.append(X_file)
+                    y_all.append(np.full(X_file.shape[0], label_id))
                 
                 processed_cnt += 1
                 if not silent: self.progress_update.emit(int((processed_cnt / total_files) * 50))
@@ -306,5 +356,5 @@ class TrainingWorker(QObject):
         X_base = np.vstack(X_all)
         y_base = np.concatenate(y_all)
         
-        if not silent: self.log_message.emit(f"Total Loaded Samples: {X_base.shape[0]}")
+        if not silent: self.log_message.emit(f"Total Active Samples: {X_base.shape[0]}")
         return X_base, y_base

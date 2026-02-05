@@ -38,6 +38,10 @@ class OptimizationWorker(QObject):
         self.data_cache = main_vm_cache 
         self.initial_params = initial_params
         self.base_data_cache = base_data_cache # Handoff Data
+        
+        # AI가 추가함: 제외 파일 목록
+        self.excluded_files = initial_params.get('excluded_files', set())
+        
         self.model_type = model_type
         
         # Thread-safe Cache will be created in run() to ensure thread affinity
@@ -73,9 +77,8 @@ class OptimizationWorker(QObject):
             
             self.best_params = best_params
             
-            # AI가 수정함: 통합 캐시로 Base Data emit
-            if self.cached_X is not None and self.cached_y is not None:
-                self.base_data_ready.emit(self.cached_X, self.cached_y)
+            # AI가 수정함: 통합 캐시 Update는 Load Loop 내부에서 개별적으로 수행됨
+            # self.cached_X / cached_y는 내부 최적화용으로만 유지
             
             self.optimization_finished.emit(True)
             
@@ -102,10 +105,9 @@ class OptimizationWorker(QObject):
         NO Subsampling Limit (User Request).
         """
         # 0. Handoff Cache Check (Bi-Directional)
-        if self.base_data_cache is not None:
-             self.log_message.emit("⚡ Handoff Cache Hit! Reusing masked data from Training...")
-             self.cached_X, self.cached_y = self.base_data_cache
-             return True
+        # 0. Handoff Cache Check (Dict Cache Awareness)
+        # base_data_cache is now Dict {path: (X_b, y)}
+        if self.base_data_cache is None: self.base_data_cache = {}
 
         EXCLUDED_NAMES = ["-", "unassigned", "trash", "ignore"]
         valid_groups = {}
@@ -120,44 +122,70 @@ class OptimizationWorker(QObject):
         X_all = []
         y_all = []
         
-        # Load EVERYTHING
+        X_all = []
+        y_all = []
+        
+        # Load EVERYTHING (Selective)
         total_classes = len(valid_groups)
         for label_id, (class_name, files) in enumerate(valid_groups.items()):
             class_pixels = 0  # AI가 수정함: 클래스별 픽셀 수 추적
-            for f in files:
+            # AI가 수정함: 파일 로딩 순서 고정 (재현성 보장)
+            sorted_files = sorted(files)
+            for f in sorted_files:
                 if not self.is_running: return False
+                
+                # 1. Check Exclusion
+                if f in self.excluded_files:
+                    # self.log_message.emit(f"   [Skip] '{os.path.basename(f)}'")
+                    continue
+
                 try:
-                    # Cache Check
-                    if f in self.data_cache:
-                         cube, waves = self.data_cache[f]
+                    # 2. Check Base Data Cache (Dict)
+                    if f in self.base_data_cache:
+                        # self.log_message.emit(f"   [Cache] '{os.path.basename(f)}'")
+                        data, _ = self.base_data_cache[f] # (X_base, y)
+                        
+                        # OptimizationWorker expects "Base Data" (Masked + Reflectance)
+                        # So we can use it directly.
+                        if data.shape[0] > 0:
+                            X_all.append(data)
+                            y_all.append(np.full(data.shape[0], label_id))
+                            class_pixels += data.shape[0]
                     else:
-                         cube, waves = load_hsi_data(f)
-                         cube = np.nan_to_num(cube) 
-                         self.data_cache[f] = (cube, waves)
-                    
-                    cube = np.nan_to_num(cube)
-                    
-                    # Use Service to get valid pixels with Ref Conversion
-                    data, mask = ProcessingService.process_cube(
-                        cube,
-                        mode=self.processing_mode,
-                        threshold=self.threshold,
-                        mask_rules=self.mask_rules,
-                        prep_chain=[], 
-                        white_ref=self.white_ref,
-                        dark_ref=self.dark_ref
-                    )
-                    
-                    if data.shape[0] > 0:
-                        X_all.append(data)
-                        y_all.append(np.full(data.shape[0], label_id))
-                        class_pixels += data.shape[0]
+                        # 3. Load from Disk
+                        # Cache Check (File)
+                        if f in self.data_cache:
+                             cube, waves = self.data_cache[f]
+                        else:
+                             cube, waves = load_hsi_data(f)
+                             cube = np.nan_to_num(cube) 
+                             self.data_cache[f] = (cube, waves)
+                        
+                        cube = np.nan_to_num(cube)
+                        
+                        # Use Service to get valid pixels with Ref Conversion
+                        data, mask = ProcessingService.process_cube(
+                            cube,
+                            mode=self.processing_mode,
+                            threshold=self.threshold,
+                            mask_rules=self.mask_rules,
+                            prep_chain=[], 
+                            white_ref=self.white_ref,
+                            dark_ref=self.dark_ref
+                        )
+                        
+                        if data.shape[0] > 0:
+                            X_all.append(data)
+                            y_all.append(np.full(data.shape[0], label_id))
+                            class_pixels += data.shape[0]
+                            
+                            # Update Base Cache (Emit)
+                            # Emit format: (file_path, (data, None))
+                            self.base_data_ready.emit(f, (data, None))
+                            
                 except Exception as e:
                     # AI가 수정함: Strict Mode - 로드 에러 은폐 금지
                     self.log_message.emit(f"Critical Error loading {f}: {e}")
-                    # 만약 하나라도 실패하면 전체 데이터 신뢰성 문제가 생기므로 중단하는 것이 맞음
-                    # 하지만 편의상 실패 파일만 스킵하고 로그를 남길 수도 있음.
-                    # Strict Mode 정책에 따라 여기서는 '실패'로 간주하고 False 리턴 (가장 안전)
                     return False
             
             # AI가 수정함: 클래스별 로딩 완료 로그

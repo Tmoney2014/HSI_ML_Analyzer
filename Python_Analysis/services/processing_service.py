@@ -104,31 +104,36 @@ class ProcessingService:
         - 성능: 배경 픽셀에 불필요한 Log 연산 회피
         - 일관성: Python 학습 ↔ C# 추론 동일 기준
         """
-        # 1. Input Sanitization
-        cube = np.nan_to_num(cube)
-        
-        # 2. Masking FIRST on Raw Cube (설계 원칙)
-        # AI가 수정함: Raw 값 기준으로 마스킹하여 학습-추론 일관성 보장
-        mask = processing.create_background_mask(cube, threshold, mask_rules)
-        if mask.dtype != bool: 
-            mask = mask.astype(bool)
-        
-        # 3. Apply Mask to Raw Cube (get valid pixels only)
-        flat_raw = processing.apply_mask(cube, mask)  # (N, B)
-        
-        # 4. Convert valid pixels only to Ref/Abs
-        if mode in ["Reflectance", "Absorbance"]:
-            flat_data = ProcessingService.convert_to_ref_flat(flat_raw, white_ref, dark_ref)
-        else:
-            flat_data = flat_raw.astype(np.float32)
-        
-        # 5. Absorbance Transform (on valid pixels only)
-        if mode == "Absorbance":
-            # Apply log(1/R) -> -log(R)
-            flat_data = np.where(flat_data <= 0, 1e-6, flat_data)
-            flat_data = -np.log10(flat_data)
-        
-        return flat_data, mask
+        try:
+            # 1. Input Sanitization
+            cube = np.nan_to_num(cube)
+            
+            # 2. Masking FIRST on Raw Cube
+            mask = processing.create_background_mask(cube, threshold, mask_rules)
+            
+            if mask.dtype != bool: 
+                mask = mask.astype(bool)
+            
+            # 3. Apply Mask to Raw Cube
+            flat_raw = processing.apply_mask(cube, mask) 
+            
+            # 4. Convert valid pixels only to Ref/Abs
+            if mode in ["Reflectance", "Absorbance"]:
+                flat_data = ProcessingService.convert_to_ref_flat(flat_raw, white_ref, dark_ref)
+            else:
+                flat_data = flat_raw.astype(np.float32)
+            
+            # 5. Absorbance Transform
+            if mode == "Absorbance":
+                flat_data = np.where(flat_data <= 0, 1e-6, flat_data)
+                flat_data = -np.log10(flat_data)
+            
+            return flat_data, mask
+            
+        except Exception as e:
+            # print(f"DB [Error] get_base_data failed: {e}")
+            raise e
+
 
     @staticmethod
     def _req(params: dict, key: str, step_name: str):
