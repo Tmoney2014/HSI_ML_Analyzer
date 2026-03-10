@@ -89,7 +89,7 @@ Python_Analysis/
 ### 2. 분석 & 시각화
 - 실시간 스펙트럼 시각화
 - 배경 제거 (Threshold + Rules)
-- 전처리 파이프라인 (SG, Gap Diff, 3-Point Depth)
+- 전처리 파이프라인 (SG, Gap Diff)
 
 ### 3. 학습 & 최적화
 - SPA 기반 밴드 선택
@@ -108,7 +108,7 @@ Python_Analysis/
 {
   "ModelType": "LinearModel",
   "SelectedBands": [40, 42, 97, 99, 105],
-  "RequiredRawBands": [35, 40, 42, 92, 97, 99, 100, 105],
+  "RequiredRawBands": [40, 42, 45, 47, 97, 99, 102, 104, 105, 110],
   "Weights": [[...], [...]],
   "Bias": [...],
   "Preprocessing": {
