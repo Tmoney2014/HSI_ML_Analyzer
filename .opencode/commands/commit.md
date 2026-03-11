@@ -1,32 +1,110 @@
 ---
-description: HSI 프로젝트 컨벤션으로 커밋 생성 (type 영어, 나머지 한국어)
-agent: build
-subtask: true
+description: 변경 파일을 논리적 단위로 묶어 HSI_ML_Analyzer 컨벤션에 맞게 커밋
 ---
 
-현재 스테이징 상태와 변경사항을 분석하고, HSI_ML_Analyzer 프로젝트 컨벤션에 맞는 커밋을 생성합니다.
+HSI_ML_Analyzer Git 커밋 컨벤션에 따라 변경사항을 스마트하게 커밋한다.
 
-## 컨벤션 규칙
-- 커밋 타입은 영어: `feat`, `fix`, `refactor`, `docs`, `chore`, `style`, `test`, `perf`
-- 나머지 설명은 한국어
-- 형식: `<type>: <한국어 설명>`
-- 예시: `feat: 학습 결과 캐시 무효화 로직 추가`, `fix: PLS-DA export 속성 누락 버그 수정`
+## 핵심 규칙 (절대 위반 금지)
+- **이 커맨드 자체가 명시적 요청이므로 커밋 진행**
+- **커밋 이후 Push는 절대 하지 않는다**
+- **수정 개연성이 있는 파일들끼리만 묶어서 따로따로 커밋한다** (논리적 단위 분리)
+- `--no-verify`, `--force` 등 훅 우회 옵션 절대 사용 금지
 
-## 작업 지시
+---
 
-$ARGUMENTS
+## Workflow
 
-## 절차
+### Step 1: 현재 상태 파악 (병렬 실행)
 
-1. `git status`로 스테이징 상태 확인
-2. `git diff --staged`로 변경 내용 확인 (미스테이징 파일은 `git diff`도 확인)
-3. 변경 내용을 분석하여 적절한 커밋 타입 결정
-4. 위 컨벤션에 맞는 커밋 메시지 초안 작성
-5. 사용자가 `$ARGUMENTS`에 메시지를 제공했다면 그것을 우선 사용
-6. `git add -A`로 전체 스테이징 후 커밋 실행 (단, `.env`, `venv/`, `__pycache__/`, `*.pyc` 제외)
-7. 커밋 성공 여부 확인
+```bash
+git status
+git diff --stat
+git diff --cached --stat
+git log --oneline -5
+```
 
-## 주의사항
-- `Python_Analysis/venv/`는 절대 커밋하지 않음
-- `__pycache__/`, `*.pyc` 파일 제외
-- `.env` 또는 인증 정보 파일 포함 시 경고 후 중단
+### Step 2: 변경 파일 논리적 그룹핑
+
+파일들을 아래 기준으로 그룹화:
+
+| 그룹 기준 | 예시 |
+|-----------|------|
+| 같은 기능/모듈 변경 | `processing.py` + `processing_service.py` → 하나의 커밋 |
+| 독립적인 버그 수정 | 각각 별도 커밋 |
+| 문서/설정만 변경 | `AGENTS.md`, `docs/` 변경 → 별도 `docs:` 커밋 |
+| ViewModel과 View 혼재 | 원칙적으로 분리 (논리적 연관성 없으면 반드시 분리) |
+| models/ vs services/ vs viewmodels/ vs views/ | 레이어 다르면 기본적으로 분리 |
+
+**판단 기준**: "이 변경들이 같은 이유로 수정되었는가?" → YES면 같이, NO면 분리
+
+### Step 3: 커밋 메시지 작성
+
+**형식**: `<type>: <subject>` (한글, 50자 이내, 명령형)
+
+**Type 목록**:
+| Type | 사용 시점 |
+|------|-----------|
+| `feat` | 새 기능 추가 |
+| `fix` | 버그 수정 |
+| `docs` | 문서 변경 (코드 변경 없음) |
+| `style` | 포맷팅, 세미콜론 등 (로직 변경 없음) |
+| `refactor` | 리팩토링 (기능 변경 없음) |
+| `perf` | 성능 개선 |
+| `test` | 테스트 코드 추가/수정 |
+| `chore` | 빌드, 설정, 기타 작업 |
+
+**예시**:
+```
+feat: SPA 밴드 선택 결과 시각화 추가
+fix: 배경 마스크 규칙 파싱 오류 수정
+perf: SmartCache LRU 메모리 한도 적용
+refactor: ProcessingService 전처리 체인 분리
+docs: C# 패리티 검증 보고서 AGENTS.md 반영
+chore: venv 디렉토리 .gitignore 제외 추가
+```
+
+### Step 4: 그룹별 순차 커밋
+
+각 그룹에 대해:
+```bash
+git add <관련 파일들>
+git commit -m "<type>: <subject>"
+```
+
+본문이 필요한 경우 (변경이 복잡할 때):
+```bash
+git commit -m "<type>: <subject>" -m "<한국어 본문 설명>"
+```
+
+### Step 5: 결과 보고
+
+커밋 완료 후 요약 출력:
+
+```
+✅ 커밋 완료
+
+[커밋 1] abc1234 feat: ...
+[커밋 2] def5678 fix: ...
+...
+
+총 N개 커밋 | Push는 하지 않았습니다.
+```
+
+---
+
+## $ARGUMENTS 처리
+
+**$ARGUMENTS가 있으면**: 해당 내용을 커밋 메시지로 사용하되, 타입이 없으면 자동 추론. 모든 변경을 단일 커밋으로.  
+**$ARGUMENTS가 없으면**: Step 1~5 전체 플로우 실행.
+
+---
+
+## Anti-Patterns (절대 금지)
+
+| 금지 | 이유 |
+|------|------|
+| `git add .` 후 단일 커밋 | 논리적 단위 분리 원칙 위반 |
+| `git push` 실행 | 이 커맨드는 커밋만 한다 |
+| `--no-verify` | 훅 우회 금지 |
+| 영어 커밋 메시지 | 이 프로젝트는 한국어 메시지 사용 |
+| `chore:` 남용 | 정확한 type 분류 필수 |
