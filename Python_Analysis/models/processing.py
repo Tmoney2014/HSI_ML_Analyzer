@@ -74,8 +74,10 @@ def apply_mask(cube, mask):
     return cube[mask]
 
 def apply_snv(data):
+    # AI가 수정함: ddof=1 (표본표준편차, N-1) — C# SnvProcessor 패리티 일치
+    # SNV 학술 표준(Barnes et al., 1989)은 표본표준편차(N-1) 사용
     mean = np.mean(data, axis=1, keepdims=True)
-    std = np.std(data, axis=1, keepdims=True)
+    std = np.std(data, axis=1, ddof=1, keepdims=True)
     std[std == 0] = 1e-10
     return (data - mean) / std
 
