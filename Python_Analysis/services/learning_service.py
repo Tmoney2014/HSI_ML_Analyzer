@@ -308,13 +308,16 @@ class LearningService:
         
         # Parameters (Strict Mode Validation)
         is_deriv = prep_flat.get("ApplyDeriv", False)
+        # AI가 수정함: ApplyAbsorbance=True 시 LogGapFeatureExtractor가 gap 밴드를 필요로 함
+        # ApplyDeriv와 별도로 gap 오프셋 밴드를 RequiredRawBands에 포함해야 C# 런타임 Clamp 방지
+        is_absorbance = prep_flat.get("ApplyAbsorbance", False)
         
-        # 1. Check Deriv Gap
+        # 1. Check Deriv Gap (SimpleDeriv 또는 Absorbance 모드 모두 Gap 사용)
         deriv_gap = 5 # Default
-        if is_deriv:
+        if is_deriv or is_absorbance:
             if "Gap" not in prep_flat:
                  # 만약 UI가 Gap을 안 줬다면 에러
-                 raise ValueError("Export Error: 'Gap' parameter is missing for Derivative!")
+                 raise ValueError("Export Error: 'Gap' parameter is missing for Derivative/Absorbance!")
             deriv_gap = prep_flat["Gap"]
         
         deriv_order = prep_flat.get("DerivOrder", 1)
@@ -327,8 +330,8 @@ class LearningService:
         sg_win = prep_flat.get("SGWin", 5)
         sg_radius = sg_win // 2 if is_sg else 0
         
-        # Step 1: Core Base Bands (Deriv 고려)
-        # 만약 Deriv 미사용이면 base_bands = selected_bands
+        # Step 1: Core Base Bands (Deriv 또는 Absorbance gap 고려)
+        # 만약 Deriv/Absorbance 미사용이면 base_bands = selected_bands
         base_bands = set()
         for b in selected_bands:
             base_idx = int(b)
@@ -339,6 +342,10 @@ class LearningService:
                 # 2차 미분 -> b, b+Gap, b+2*Gap 필요 ...
                 for k in range(1, deriv_order + 1):
                     base_bands.add(base_idx + (k * deriv_gap))
+            elif is_absorbance and deriv_gap > 0:
+                # AI가 수정함: Absorbance 모드에서도 LogGapFeatureExtractor가 b+gap 밴드 접근
+                # ApplyDeriv 없이 Absorbance만 사용 시 gap 밴드 누락 방지
+                base_bands.add(base_idx + deriv_gap)
         
         # Step 2: Expand by SG Window (SG 고려)
         # 모든 Base Band에 대해 Radius 만큼 좌우로 확장
@@ -346,10 +353,21 @@ class LearningService:
             required_raw_bands.add(base) # 자기 자신
             if sg_radius > 0:
                 for offset in range(1, sg_radius + 1):
-                    required_raw_bands.add(base - offset)
+                    # AI가 수정함: 음수 인덱스 방지 (max(0, base - offset))
+                    left_idx = max(0, base - offset)
+                    required_raw_bands.add(left_idx)
                     required_raw_bands.add(base + offset)
         
         required_raw_bands_sorted = sorted(list(required_raw_bands))
+        
+        # AI가 추가함: PrepChainOrder — C# HsiPipeline이 전처리 순서를 prep_chain 그대로 재현하기 위한 필드
+        # Python prep_chain의 각 step 이름만 순서대로 추출 (파라미터 제외, C#은 Preprocessing 섹션에서 읽음)
+        prep_chain_order = []
+        if preprocessing_config:
+            for step in preprocessing_config:
+                step_name = step.get('name')
+                if step_name:
+                    prep_chain_order.append(step_name)
         
         export_data = {
             "ModelType": "LinearModel", # Unified name
@@ -359,6 +377,7 @@ class LearningService:
             "Timestamp": timestamp, # AI가 추가함
             "SelectedBands": [int(b) for b in selected_bands],
             "RequiredRawBands": required_raw_bands_sorted,  # AI가 추가함: 런타임용 원본 밴드 목록
+            "PrepChainOrder": prep_chain_order,             # AI가 추가함: 전처리 적용 순서 (C# 패리티용)
             "ExcludeBands": exclude_rules if exclude_rules else "",
             "Weights": weights,
             "Bias": bias,
