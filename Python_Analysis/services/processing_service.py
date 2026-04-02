@@ -181,5 +181,8 @@ class ProcessingService:
                 flat_data = processing.apply_minmax_norm(flat_data)
             elif name == "Center": 
                 flat_data = processing.apply_mean_centering(flat_data)
+            else:
+                # AI가 추가함: 알 수 없는 step name 경고 (silent skip 방지)
+                print(f"Warning: [ProcessingService] Unknown prep step '{name}' — skipped. Check prep_chain configuration.")
         
         return flat_data
