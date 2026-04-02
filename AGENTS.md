@@ -59,7 +59,7 @@ HSI_ML_Analyzer/
 
 - Running training/SPA/preprocessing on UI thread.
 - Committing `Python_Analysis/venv/`, `build/`, `dist/` artifacts as source.
-- Calling `apply_snv()` in production MROI pipeline.
+- Applying `apply_snv()` without dataset-level validation in MROI pipeline.
 - Editing processing formulas without parity checks.
 
 ## COMMANDS

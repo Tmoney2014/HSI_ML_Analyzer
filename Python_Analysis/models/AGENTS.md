@@ -15,7 +15,7 @@ Pure mathematical functions implementing spectral preprocessing. **C# runtime pa
 | `apply_simple_derivative` | `(data, gap, order, apply_ratio, ndi_threshold)` → `ndarray (N, B-gap*order)` | Fewer bands | ✅ Gap-Diff |
 | ~~`apply_rolling_3point_depth`~~ | 미구현 | — | ❌ 미구현 (Python/C# 모두 없음) |
 | `apply_savgol` | `(data, window_size, poly_order, deriv)` → `ndarray` | Same as input | ✅ SG filter |
-| `apply_snv` | `(data)` → `ndarray` | Same as input | ❌ MROI-incompatible; `ddof=1` for C# SnvProcessor parity (`# AI가 수정됨`) |
+| `apply_snv` | `(data)` → `ndarray` | Same as input | ⚠️ `ddof=1` parity; requires dataset-level validation for MROI |
 | `apply_min_subtraction` | `(data)` → `ndarray` | Same as input | — |
 | `apply_l2_norm` | `(data)` → `ndarray` | Same as input | — |
 | `apply_minmax_norm` | `(data)` → `ndarray` | Same as input | — |
@@ -45,6 +45,6 @@ Pure mathematical functions implementing spectral preprocessing. **C# runtime pa
 ## ANTI-PATTERNS
 
 - Do NOT add stateful classes here
-- Do NOT call `apply_snv()` in any training or inference pipeline
+- Do NOT apply `apply_snv()` without dataset-level validation (especially in MROI)
 - Do NOT modify formulas without verifying against C# runtime implementation
 - Do NOT import PyQt5 or any UI framework here
