@@ -47,7 +47,12 @@ class LearningService:
     # --- Private Model Implementations ---
 
     def _train_svm(self, X, y, test_ratio, log):
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
+        # AI가 수정함: V2-STR — stratify=y 추가 (클래스 비율 보존), 샘플 부족 시 fallback
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42, stratify=y)
+        except ValueError:
+            log("⚠️ [SVM] Stratified split 불가 (클래스 샘플 부족). 일반 split으로 진행합니다.")
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
         model = LinearSVC(dual=False, max_iter=cfg_get('model', 'svm_max_iter', 1000))  # AI가 수정함
         try:
             model.fit(X_train, y_train)
@@ -79,7 +84,12 @@ class LearningService:
             raise
 
     def _train_lda(self, X, y, test_ratio, log):
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
+        # AI가 수정함: V2-STR — stratify=y 추가 (클래스 비율 보존), 샘플 부족 시 fallback
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42, stratify=y)
+        except ValueError:
+            log("⚠️ [LDA] Stratified split 불가 (클래스 샘플 부족). 일반 split으로 진행합니다.")
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
         model = LinearDiscriminantAnalysis() # Defaults are usually good
         try:
             model.fit(X_train, y_train)
@@ -114,7 +124,12 @@ class LearningService:
         PLS-DA Implementation using PLSRegression.
         Note: PLS is a regression algo, so we need One-Hot Encoding for multi-class classification.
         """
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
+        # AI가 수정함: V2-STR — stratify=y 추가 (클래스 비율 보존), 샘플 부족 시 fallback
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42, stratify=y)
+        except ValueError:
+            log("⚠️ [PLS-DA] Stratified split 불가 (클래스 샘플 부족). 일반 split으로 진행합니다.")
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
         
         # 1. Encode Y (Labels) -> One-Hot
         try:
@@ -130,8 +145,9 @@ class LearningService:
                 y_test_mat[i, int(val)] = 1
 
             # 2. Train PLS
-            n_components = min(X.shape[1], 10) 
-            model = PLSRegression(n_components=X.shape[1], scale=False) 
+            # AI가 수정함: n_components = min(X.shape[1], 10) 로 과도한 모델 방지
+            n_components = min(X.shape[1], 10)
+            model = PLSRegression(n_components=n_components, scale=False) 
             model.fit(X_train, y_train_mat)
             
             # 3. Predict & converting back to class
@@ -181,8 +197,14 @@ class LearningService:
                  bias_correction = lambda xm, ym, c: ym - np.dot(xm, c)
 
             # Scikit-Learn Version Compatibility for Means
-            x_mean = getattr(model, 'x_mean_', getattr(model, '_x_mean', None))
-            y_mean = getattr(model, 'y_mean_', getattr(model, '_y_mean', None))
+            # AI가 수정함: sklearn 버전별 fallback 체인 개선 — L-1
+            # sklearn <0.23: x_mean_/_y_mean_, >=0.23: _x_mean/_y_mean, 일부 버전: x_offset_
+            x_mean = getattr(model, 'x_mean_', 
+                     getattr(model, '_x_mean', 
+                     getattr(model, 'x_offset_', None)))
+            y_mean = getattr(model, 'y_mean_', 
+                     getattr(model, '_y_mean', 
+                     getattr(model, 'y_offset_', None)))
             
             if x_mean is not None and y_mean is not None:
                 try:
@@ -192,7 +214,12 @@ class LearningService:
                     print(f"   [Error] Bias calc failed: {ex}. Zero bias.")
                     model.export_intercept_ = np.zeros(n_targets_in)
             else:
-                 print("   [Warning] PLS Means not found. Assuming Zero Bias.")
+                 import sklearn, warnings
+                 warnings.warn(
+                     f"PLS intercept 계산 실패: x_mean/y_mean 속성을 찾을 수 없습니다 "
+                     f"(sklearn {sklearn.__version__}). Zero bias 사용 — 모델 정확도 저하 가능.",
+                     RuntimeWarning
+                 )
                  model.export_intercept_ = np.zeros(n_targets_in)
             
             metrics = {
@@ -210,7 +237,7 @@ class LearningService:
 
     # ----------------------------------------
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None, mean_spectrum=None, spa_scores=None, metrics=None, model_name="model", description=""):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None, mean_spectrum=None, spa_scores=None, metrics=None, model_name="model", description="", total_bands=None):
         """
         Export model to JSON for C#.
         Handles SVM, PLS-DA, and LDA (Linear Only).
@@ -227,19 +254,49 @@ class LearningService:
         bias = []
         is_multiclass = False
         
+        # AI가 수정함: V2-SB — selected_bands 정규화 (sort + dedup)
+        # SPA는 비정렬 순서로 반환 가능 → 정렬 후 Weights 열도 동일 순서로 재정렬 필요
+        original_bands = list(selected_bands)
+        selected_bands = sorted(set(int(b) for b in selected_bands))
+
+        # AI가 수정함: V2-RRB — total_bands None일 때 mean_spectrum 길이로 자동 유추
+        if total_bands is None and mean_spectrum is not None:
+            total_bands = len(mean_spectrum)
+
         # 1. Extract Weights based on Model Type
         if isinstance(model, LinearSVC) or isinstance(model, LinearDiscriminantAnalysis):
             # Both LinearSVC and LDA share similar coef_ structure
             if model.coef_.ndim > 1 and model.coef_.shape[0] > 1:
-                weights = model.coef_.tolist()
+                raw_weights = np.array(model.coef_)  # shape: (n_classes, n_features_original)
+                # AI가 수정함: V2-SB — SelectedBands 정렬 시 Weights 열 순서도 같이 재정렬
+                # original_bands 순서 → selected_bands(정렬) 순서로 열 인덱스 매핑
+                if original_bands != selected_bands:
+                    band_to_col = {int(b): i for i, b in enumerate(original_bands)}
+                    col_order = [band_to_col[b] for b in selected_bands if b in band_to_col]
+                    raw_weights = raw_weights[:, col_order]
+                weights = raw_weights.tolist()
                 bias = model.intercept_.tolist()
                 is_multiclass = True
+                # AI가 추가함: V2-LDA — LDA multi-class coef_ shape 검증 (C# parity 방어)
+                if isinstance(model, LinearDiscriminantAnalysis):
+                    n_classes_actual = model.coef_.shape[0]
+                    n_classes_expected = len(np.unique(model.classes_))
+                    assert n_classes_actual == n_classes_expected, (
+                        f"LDA coef_ shape mismatch: {n_classes_actual} rows != "
+                        f"{n_classes_expected} classes. C# Weights 해석 불일치 가능."
+                    )
             else:
                 # Binary or Single Class
                 if model.coef_.ndim == 1:
-                     weights = model.coef_.tolist()
+                     raw_coef = model.coef_
                 else:
-                     weights = model.coef_[0].tolist()
+                     raw_coef = model.coef_[0]
+                # AI가 수정함: V2-SB — binary 케이스도 Weights 열 재정렬
+                if original_bands != selected_bands:
+                    band_to_col = {int(b): i for i, b in enumerate(original_bands)}
+                    col_order = [band_to_col[b] for b in selected_bands if b in band_to_col]
+                    raw_coef = raw_coef[col_order]
+                weights = raw_coef.tolist()
                 
                 # Ensure bias is float
                 if hasattr(model.intercept_, '__len__') and len(model.intercept_) > 0:
@@ -298,7 +355,6 @@ class LearningService:
                 elif name == "L2": prep_flat["ApplyL2"] = True
                 elif name == "MinMax": prep_flat["ApplyMinMax"] = True
                 elif name == "SNV": prep_flat["ApplySNV"] = True
-                elif name == "Center": prep_flat["ApplyCenter"] = True
                 elif name == "MinSub": prep_flat["ApplyMinSub"] = True  # AI가 추가함: MinSub export
                 # Absorbance is handled by Mode
         
@@ -312,16 +368,14 @@ class LearningService:
         
         # Parameters (Strict Mode Validation)
         is_deriv = prep_flat.get("ApplyDeriv", False)
-        # AI가 수정함: ApplyAbsorbance=True 시 LogGapFeatureExtractor가 gap 밴드를 필요로 함
-        # ApplyDeriv와 별도로 gap 오프셋 밴드를 RequiredRawBands에 포함해야 C# 런타임 Clamp 방지
-        is_absorbance = prep_flat.get("ApplyAbsorbance", False)
         
-        # 1. Check Deriv Gap (SimpleDeriv 또는 Absorbance 모드 모두 Gap 사용)
+        # 1. Check Deriv Gap (SimpleDeriv 사용 시에만 gap 밴드 필요 — Absorbance 단독은 C#이 gap 접근 안 함)
+        # AI가 수정함: is_absorbance 분기 제거 — SimpleDeriv 없이 Absorbance만 쓰면 gap 불필요
         deriv_gap = 5 # Default
-        if is_deriv or is_absorbance:
+        if is_deriv:
             if "Gap" not in prep_flat:
                  # 만약 UI가 Gap을 안 줬다면 에러
-                 raise ValueError("Export Error: 'Gap' parameter is missing for Derivative/Absorbance!")
+                 raise ValueError("Export Error: 'Gap' parameter is missing for Derivative!")
             deriv_gap = prep_flat["Gap"]
         
         deriv_order = prep_flat.get("DerivOrder", 1)
@@ -346,10 +400,6 @@ class LearningService:
                 # 2차 미분 -> b, b+Gap, b+2*Gap 필요 ...
                 for k in range(1, deriv_order + 1):
                     base_bands.add(base_idx + (k * deriv_gap))
-            elif is_absorbance and deriv_gap > 0:
-                # AI가 수정함: Absorbance 모드에서도 LogGapFeatureExtractor가 b+gap 밴드 접근
-                # ApplyDeriv 없이 Absorbance만 사용 시 gap 밴드 누락 방지
-                base_bands.add(base_idx + deriv_gap)
         
         # Step 2: Expand by SG Window (SG 고려)
         # 모든 Base Band에 대해 Radius 만큼 좌우로 확장
@@ -363,6 +413,23 @@ class LearningService:
                     required_raw_bands.add(base + offset)
         
         required_raw_bands_sorted = sorted(list(required_raw_bands))
+        # AI가 추가함: total_bands 클램프 — SG radius/gap offset이 원본 밴드 범위 초과 방지
+        # AI가 수정함: V2-RRB — total_bands None 시 경고 (mean_spectrum 유추는 위에서 이미 처리됨)
+        if total_bands is not None and total_bands > 0:
+            required_raw_bands_sorted = [b for b in required_raw_bands_sorted if 0 <= b < total_bands]
+        else:
+            import warnings
+            warnings.warn(
+                "export_model: total_bands를 결정할 수 없어 RequiredRawBands 상한 검사를 건너뜁니다. "
+                "범위 초과 밴드 인덱스가 포함될 수 있습니다.",
+                RuntimeWarning
+            )
+        
+        # AI가 추가함: export 직전 weights/bias 형태 검증 — [L-2]
+        # 잘못된 shape으로 model.json 생성 시 C# 런타임 로드 오류 방지
+        assert len(weights) > 0, "export_model: Weights must not be empty. Model extraction failed."
+        if isinstance(bias, list):
+            assert len(bias) > 0, "export_model: Bias must not be empty."
         
         # AI가 추가함: PrepChainOrder — C# HsiPipeline이 전처리 순서를 prep_chain 그대로 재현하기 위한 필드
         # Python prep_chain의 각 step 이름만 순서대로 추출 (파라미터 제외, C#은 Preprocessing 섹션에서 읽음)
