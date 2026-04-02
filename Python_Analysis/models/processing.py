@@ -8,15 +8,19 @@ def create_background_mask(cube, threshold=0.1, band_index=None):
     """
     try:
         threshold = float(threshold)
-    except:
+    except (TypeError, ValueError):
+        # AI가 추가함: threshold 파싱 실패 경고 — silent fallback 대신 명시적 경고
+        print(f"Warning: [create_background_mask] Invalid threshold value '{threshold}' — using 0.0 (all pixels included)")
         threshold = 0.0
         
     H, W, B = cube.shape
     
     # 1. Complex Rules (Advanced String Rules with & |)
-    if isinstance(band_index, str) and any(op in band_index for op in ['>', '<']):
+    # AI가 수정함: != / == 연산자도 complex rule 경로로 진입하도록 감지 조건 확장
+    if isinstance(band_index, str) and any(op in band_index for op in ['>', '<', '==', '!=']):
         try:
-            pattern = r'[bB]?(\d+)\s*([><=]+)\s*([\d.]+(?:[eE][+-]?\d+)?)'
+            # AI가 수정함: != 연산자 지원 추가 — [><=!]+ 로 패턴 확장
+            pattern = r'[bB]?(\d+)\s*([><=!]+)\s*([\d.]+(?:[eE][+-]?\d+)?)'
             matches = list(re.finditer(pattern, band_index))
             mask_dict = {}
             processed_rule = band_index
@@ -33,7 +37,12 @@ def create_background_mask(cube, threshold=0.1, band_index=None):
                     elif op == '<=': sub_mask = band_img <= val
                     elif op == '>': sub_mask = band_img > val
                     elif op == '<': sub_mask = band_img < val
-                    else: sub_mask = np.zeros((H, W), dtype=bool) 
+                    # AI가 추가함: == / != 연산자 지원 — C# MaskRule 패리티 (동시 추가)
+                    elif op == '==': sub_mask = band_img == val
+                    elif op == '!=': sub_mask = band_img != val
+                    else:
+                        print(f"Warning: [create_background_mask] Unsupported operator '{op}' — rule skipped (returns empty mask)")
+                        sub_mask = np.zeros((H, W), dtype=bool)
                 else:
                     sub_mask = np.zeros((H, W), dtype=bool)
                 
@@ -74,19 +83,33 @@ def apply_mask(cube, mask):
     return cube[mask]
 
 def apply_snv(data):
-    # AI가 수정함: ddof=1 (표본표준편차, N-1) — C# SnvProcessor 패리티 일치
-    # SNV 학술 표준(Barnes et al., 1989)은 표본표준편차(N-1) 사용
+    # AI가 수정함: zero-std guard — C# SnvProcessor 패리티 일치 (ddof=1, threshold 1e-9)
+    # C#: if (std > 1e-9) 일 때만 정규화, 그 외 원본 유지
+    # 이전 방식 (std==0 → 1e-10)은 수치 폭발 유발 + 수치 근-0 미처리 문제
+    # 학술 표준 (Barnes et al., 1989): 표본 표준편차 (N-1, ddof=1) 사용
     mean = np.mean(data, axis=1, keepdims=True)
     std = np.std(data, axis=1, ddof=1, keepdims=True)
-    std[std == 0] = 1e-10
-    return (data - mean) / std
+    result = data.copy()
+    valid = std.squeeze(axis=1) > 1e-9
+    result[valid] = (data[valid] - mean[valid]) / std[valid]
+    return result
 
 def apply_savgol(data, window_size=5, poly_order=2, deriv=0):
+    # AI가 추가함: 입력 검증 — C# SavitzkyGolayProcessor 패리티 일치
+    # C#: 짝수 windowSize → 홀수로 자동 올림. Python도 동일 처리.
+    if window_size % 2 == 0:
+        window_size += 1
+    if window_size <= poly_order:
+        raise ValueError(
+            f"Strict Mode Error: window_size({window_size}) must be > poly_order({poly_order}). "
+            "SG filter 요구사항: window_length > polyorder."
+        )
+    if data.shape[1] < window_size:
+        raise ValueError(
+            f"Strict Mode Error: Not enough bands for SG filter. "
+            f"Has {data.shape[1]}, Need >= {window_size}."
+        )
     return savgol_filter(data, window_length=window_size, polyorder=poly_order, deriv=deriv, axis=1)
-
-def apply_mean_centering(data):
-    mean_spectrum = np.mean(data, axis=0)
-    return data - mean_spectrum
 
 def apply_min_subtraction(data):
     """
@@ -97,26 +120,36 @@ def apply_min_subtraction(data):
     return data - min_vals
 
 def apply_l2_norm(data):
+    # AI가 수정함: zero-norm guard — C# L2NormalizeProcessor 패리티 일치
+    # C#: if (sumSq > 1e-9) 일 때만 정규화, 그 외 원본 유지
+    # 이전 방식 (l2_norms==0 → 1e-10)은 수치 폭발(÷1e-10) 유발
     l2_norms = np.linalg.norm(data, axis=1, keepdims=True)
-    l2_norms[l2_norms == 0] = 1e-10
-    return data / l2_norms
+    result = data.copy()
+    valid = l2_norms.squeeze(axis=1) > np.sqrt(1e-9)  # ~3.16e-5 임계값 (C# sumSq>1e-9 동등)
+    result[valid] = data[valid] / l2_norms[valid]
+    return result
 
 def apply_minmax_norm(data):
+    # AI가 수정함: zero-range guard — C# MinMaxProcessor 패리티 일치
+    # C#: if (range > 1e-9) 일 때만 정규화, 그 외 원본 유지
+    # 이전 방식 (range==0 → 1e-10)은 수치 폭발(÷1e-10) 유발
     min_vals = np.min(data, axis=1, keepdims=True)
     max_vals = np.max(data, axis=1, keepdims=True)
     range_vals = max_vals - min_vals
-    range_vals[range_vals == 0] = 1e-10
-    return (data - min_vals) / range_vals
+    result = data.copy()
+    valid = range_vals.squeeze(axis=1) > 1e-9
+    result[valid] = (data[valid] - min_vals[valid]) / range_vals[valid]
+    return result
 
-def apply_simple_derivative(data, gap: int = 5, order: int = 1, apply_ratio: bool = False, ndi_threshold: float = 1e-4):
+def apply_simple_derivative(data, gap: int = 5, order: int = 1):
     """
     /// <ai>AI가 작성함</ai>
     Gap Difference (Simple Differentiation).
     주어진 Gap 만큼 떨어진 밴드 간의 차이를 계산합니다.
-    공식: Output[i] = Band[i] - Band[i + gap]
+    공식: Output[i] = Band[i + gap] - Band[i]  (Forward Difference, numpy.diff 방향)
     
-    [Option] Apply Ratio (NDI):
-    공식: Output[i] = (Band[i] - Band[i + gap]) / (Band[i] + Band[i + gap] + epsilon)
+    표준 방향: Forward Difference (학계 표준 — numpy.diff, R prospectr::gapDer 동일)
+    C# 런타임 RawGapFeatureExtractor / LogGapFeatureExtractor 동일 방향.
     
     이 과정을 거치면 데이터의 밴드 수가 (Gap * order)만큼 줄어듭니다.
     
@@ -124,106 +157,29 @@ def apply_simple_derivative(data, gap: int = 5, order: int = 1, apply_ratio: boo
         data: (N_pixels, Bands) 입력 데이터
         gap: 밴드 간 간격 (Default: 5)
         order: 미분 반복 횟수 (Default: 1)
-        apply_ratio: Band Ratio (NDI) 적용 여부 (Default: False)
         
     Returns:
         diff_data: (N_pixels, New_Bands) 차분된 데이터
     """
     if gap < 1: return data
-    if order < 1: 
+    if order < 1:
         raise ValueError(f"Strict Mode: Derivative order must be >= 1 (Got {order})")
-    
-    
+
     diff_data = data.copy()
-    epsilon = 1e-6
-    
+
     for i in range(order):
         # AI가 수정함: 밴드 부족 시 에러 발생 (학습 기만 방지)
         if diff_data.shape[1] <= gap:
             raise ValueError(f"Strict Mode Error: Not enough bands for Derivative order {i+1}. Has {diff_data.shape[1]}, Need > {gap}.")
-        
-        # User Logic: data[:, :, :-GAP] - data[:, :, GAP:]
-        # Note: 
-        # A = data[:, :-gap] (Index 0 ~ N-Gap)
-        # B = data[:, gap:]  (Index Gap ~ N)
-        
-        # Correct Logic: Band[i+gap] - Band[i] (Right - Left)
-        # This matches standard derivative definition (Delta y)
-        if diff_data.shape[1] > gap:
-            A = diff_data[:, :-gap] # Left (Current)
-            B = diff_data[:, gap:]  # Right (Future)
-            
-            if apply_ratio:
-                # NDI Formula: (B - A) / (B + A)
-                # Note: NDI is typically (NIR - RED) / (NIR + RED)
-                # Here we strictly follow (Target - Base) / (Target + Base)
-                numerator = B - A
-                denominator = B + A
-                
-                mask_valid = denominator > ndi_threshold
-                diff_slice = np.zeros_like(numerator)
-                diff_slice[mask_valid] = numerator[mask_valid] / (denominator[mask_valid] + epsilon)
-                diff_data = diff_slice
-            else:
-                # Standard Derivative: B - A
-                diff_data = B - A
-        
-    return diff_data
 
-def apply_rolling_3point_depth(data, gap: int = 5):
-    """
-    /// <ai>AI가 작성함</ai>
-    Rolling 3-Point Band Depth (Continuum Removal Lite).
-    
-    Formula:
-        L = Band[i - gap]
-        R = Band[i + gap]
-        C = Band[i]
-        
-        Baseline = (L + R) / 2
-        Depth = 1 - (C / Baseline)
-        
-    Result:
-        1.0: Center is 0 (Perfect Absorption)
-        0.0: Center == Baseline (Flat)
-        < 0: Center > Baseline (Peak, not Valley)
-        
-    Args:
-        data: (N_pixels, Bands)
-        gap: Distance to shoulders (default: 5)
-        
-    Returns:
-        depth_data: (N_pixels, New_Bands)
-        New band count = Original - (2 * gap)
-    """
-    if gap < 1: 
-         raise ValueError(f"Strict Mode: Gap must be >= 1 (Got {gap})")
-    
-    # Needs at least (2*gap + 1) bands
-    if data.shape[1] < (2 * gap + 1):
-        # AI가 수정함: 밴드 부족 시 에러 발생
-        raise ValueError(f"Strict Mode Error: Not enough bands for 3-Point Depth. Has {data.shape[1]}, Need {2*gap+1}.")
-        
-    L = data[:, :-2*gap]      # Left Shoulder
-    C = data[:, gap:-gap]     # Center
-    R = data[:, 2*gap:]       # Right Shoulder
-    
-    # Baseline (Average of Shoulders)
-    baseline = (L + R) / 2.0
-    
-    # Avoid division by zero
-    epsilon = 1e-6
-    mask_valid = baseline > 1e-5
-    
-    depth_data = np.zeros_like(C)
-    
-    # Calculate Depth: 1 - (C / Baseline)
-    # Using User's logic: Score = 1 - (2*C / (L+R))
-    # Same as: 1 - (C / ((L+R)/2))
-    
-    depth_data[mask_valid] = 1.0 - (C[mask_valid] / (baseline[mask_valid] + epsilon))
-    
-    return depth_data
+        # Forward Difference: Band[i+gap] - Band[i]
+        # A = data[:, :-gap] (Index 0 ~ N-Gap) — Left (Current)
+        # B = data[:, gap:]  (Index Gap ~ N)   — Right (Future)
+        A = diff_data[:, :-gap]
+        B = diff_data[:, gap:]
+        diff_data = B - A
+
+    return diff_data
 
 def apply_absorbance(data, epsilon=1e-6):
     """

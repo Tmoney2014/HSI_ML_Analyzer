@@ -3,7 +3,7 @@ PreprocessingSettingsDialog for HSI ML Analyzer.
 Extracted from tab_analysis.py for better code organization.
 """
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLabel, 
-                             QSpinBox, QComboBox, QCheckBox, QLineEdit, 
+                             QSpinBox, QComboBox,
                              QDialogButtonBox)
 
 
@@ -41,23 +41,6 @@ class PreprocessingSettingsDialog(QDialog):
             form.addRow("Order:", cb_order)
             self.inputs["order"] = cb_order
             
-            # Application Ratio (NDI) Checkbox
-            cb_ratio = QCheckBox("Use Normalized Ratio (NDI)")
-            cb_ratio.setToolTip("Formula: (A-B) / (A+B)\nGood for lighting invariant analysis.")
-            cb_ratio.setChecked(self.params.get("ratio", False))
-            form.addRow("", cb_ratio)
-            self.inputs["ratio"] = cb_ratio
-            
-            # NDI Threshold
-            txt_thresh = QLineEdit()
-            txt_thresh.setPlaceholderText("e.g. 1000.0")
-            txt_thresh.setText(str(self.params.get("ndi_threshold", 1000.0)))
-            form.addRow("NDI Threshold:", txt_thresh)
-            self.inputs["ndi_threshold"] = txt_thresh
-            
-        elif self.key == "3PointDepth":
-            self.add_spin(form, "Gap Size (Shoulder Distance)", "gap", 5, 1, 50)
-            
         else:
             layout.addWidget(QLabel("No configurable parameters for this method."))
             
@@ -85,12 +68,4 @@ class PreprocessingSettingsDialog(QDialog):
             elif isinstance(widget, QComboBox):
                 if key == "order":
                     new_params[key] = widget.currentIndex() + 1
-            elif isinstance(widget, QCheckBox):
-                new_params[key] = widget.isChecked()
-            elif isinstance(widget, QLineEdit):
-                if key == "ndi_threshold":
-                    try:
-                        new_params[key] = float(widget.text())
-                    except:
-                        new_params[key] = 1000.0
         return new_params

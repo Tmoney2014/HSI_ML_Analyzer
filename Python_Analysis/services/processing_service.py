@@ -125,8 +125,10 @@ class ProcessingService:
             
             # 5. Absorbance Transform
             if mode == "Absorbance":
-                flat_data = np.where(flat_data <= 0, 1e-6, flat_data)
-                flat_data = -np.log10(flat_data)
+                # AI가 수정함: apply_absorbance() 단일 경로 통일 — P-1
+                # 이전: np.where(<=0, 1e-6) + -np.log10() 인라인 구현
+                # 문제: processing.apply_absorbance()와 코드 경로 이원화 → 한쪽만 수정 시 parity 파괴
+                flat_data = processing.apply_absorbance(flat_data)  # epsilon=1e-6 기본값
             
             return flat_data, mask
             
@@ -167,9 +169,7 @@ class ProcessingService:
                 flat_data = processing.apply_simple_derivative(
                     flat_data, 
                     gap=ProcessingService._req(p, 'gap', 'SimpleDeriv'), 
-                    order=ProcessingService._req(p, 'order', 'SimpleDeriv'), 
-                    apply_ratio=p.get('ratio', False), # ratio는 boolean flag라 optional 가능 (하지만 UI에서 반드시 줌)
-                    ndi_threshold=p.get('ndi_threshold', 1e-4) # Optional
+                    order=ProcessingService._req(p, 'order', 'SimpleDeriv')
                 )
             elif name == "SNV": 
                 flat_data = processing.apply_snv(flat_data)
@@ -179,8 +179,14 @@ class ProcessingService:
                 flat_data = processing.apply_min_subtraction(flat_data)
             elif name == "MinMax": 
                 flat_data = processing.apply_minmax_norm(flat_data)
-            elif name == "Center": 
-                flat_data = processing.apply_mean_centering(flat_data)
+            elif name == "Absorbance":
+                # AI가 추가함: Absorbance step 이중 변환 방지 — P-4
+                # Absorbance 변환은 get_base_data()에서 mode='Absorbance' 시 자동 처리됨.
+                # prep_chain에 명시적으로 포함하면 이중 변환(−log10(−log10(R))) 발생.
+                raise ValueError(
+                    "Strict Mode Error: 'Absorbance' step은 prep_chain에 포함할 수 없습니다. "
+                    "Absorbance 변환은 mode='Absorbance' 설정으로 get_base_data()에서 자동 처리됩니다."
+                )
             else:
                 # AI가 추가함: 알 수 없는 step name 경고 (silent skip 방지)
                 print(f"Warning: [ProcessingService] Unknown prep step '{name}' — skipped. Check prep_chain configuration.")

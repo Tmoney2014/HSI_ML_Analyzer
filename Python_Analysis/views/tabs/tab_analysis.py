@@ -228,7 +228,6 @@ class TabAnalysis(QWidget):
             ("Min-Max Normalization", "MinMax"),
             ("Standard Normal Variate (SNV)", "SNV"),
             ("Mean Centering", "Center"),
-            ("Rolling 3-Point Depth", "3PointDepth")
         ]
 
     def _add_prep_item(self, name, key, default_params=None, checked=False):
@@ -237,7 +236,6 @@ class TabAnalysis(QWidget):
         if params is None:
             if key == "SG": params = {"win": 5, "poly": 2, "deriv": 0}
             elif key == "SimpleDeriv": params = {"gap": 1, "order": 1, "ratio": False, "ndi_threshold": 1000.0}
-            elif key == "3PointDepth": params = {"gap": 5}
             else: params = {}
             
         item = QListWidgetItem(name)
@@ -260,8 +258,6 @@ class TabAnalysis(QWidget):
         elif key == "SimpleDeriv":
             lbl = f"{base_name} [Gap={params.get('gap',1)}, Ord={params.get('order',1)}]"
             if params.get("ratio", False): lbl += f" (NDI, Th={params.get('ndi_threshold', 1000.0)})"
-        elif key == "3PointDepth":
-            lbl = f"{base_name} [Gap={params.get('gap', 5)}]"
             
         item.setText(lbl)
 
