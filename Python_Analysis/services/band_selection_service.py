@@ -84,9 +84,9 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         
         P = X_spa.copy()
         
-        # AI가 수정함: 초기 Norm을 Candidate Bands로 저장 (시각화용)
-        initial_norms = np.linalg.norm(P, axis=0)
-        importance_scores = initial_norms.copy()
+        # AI가 수정함: importance_scores를 SPA 선택 시점의 직교 기여도 노름으로 기록
+        # (초기 노름이 아닌, 직교화된 P에서의 실제 선택 근거값)
+        importance_scores = np.zeros(X_spa.shape[1])
         
         for k in range(n_proj):
             # Calculate norms of all columns (bands)
@@ -98,6 +98,8 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
                 norms[selected_internal_indices] = -1 
             
             max_idx = np.argmax(norms)
+            # AI가 수정함: 선택 시점의 직교 기여도 노름을 기록 (norms[max_idx]는 아직 마스킹 안 된 실제값)
+            importance_scores[max_idx] = np.linalg.norm(P[:, max_idx])
             selected_internal_indices.append(max_idx)
             
             if k == n_proj - 1: break
@@ -108,8 +110,8 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
             # v_norm_sq = v.T @ v
             v_norm_sq = np.dot(v.T, v)
             
-            if v_norm_sq == 0: 
-                # AI가 수정함: Strict Mode - 수학적 예외(Singularity) 발생 경고
+            if v_norm_sq < 1e-12: 
+                # AI가 수정함: 부동소수점 안전 비교 (정확한 0 비교 시 선형 종속 밴드에서 투영값 폭발 위험)
                 print(f"Warning: SPA Numerical Singularity at iter {k}. Stopping selection early.")
                 break # Numerical issue
             
