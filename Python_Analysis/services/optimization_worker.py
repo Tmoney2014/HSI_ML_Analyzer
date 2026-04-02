@@ -6,7 +6,6 @@ from services.learning_service import LearningService
 from services.processing_service import ProcessingService
 from services.band_selection_service import select_best_bands
 from services.optimization_service import OptimizationService
-from models import processing
 
 class OptimizationWorker(QObject):
     """
@@ -122,9 +121,6 @@ class OptimizationWorker(QObject):
         X_all = []
         y_all = []
         
-        X_all = []
-        y_all = []
-        
         # Load EVERYTHING (Selective)
         total_classes = len(valid_groups)
         for label_id, (class_name, files) in enumerate(valid_groups.items()):
@@ -158,10 +154,9 @@ class OptimizationWorker(QObject):
                              cube, waves = self.data_cache[f]
                         else:
                              cube, waves = load_hsi_data(f)
-                             cube = np.nan_to_num(cube) 
+                             # AI가 수정함: nan_to_num 이중 호출 제거 — O-1. 캐시 저장 전 1회만 처리.
+                             cube = np.nan_to_num(cube)
                              self.data_cache[f] = (cube, waves)
-                        
-                        cube = np.nan_to_num(cube)
                         
                         # Use Service to get valid pixels with Ref Conversion
                         # AI가 수정함: process_cube(prep_chain=[]) 대신 get_base_data() 사용 (training_worker와 동일 경로)
@@ -232,6 +227,20 @@ class OptimizationWorker(QObject):
         n_bands = X.shape[1]
         exclude_indices = [i for i in exclude_indices if 0 <= i < n_bands]
 
+        # AI가 추가함: Gap/SG 기반 SPA 상한 자동 제외
+        # SimpleDeriv 사용 시: 전처리 후 자연히 상한 제한됨. SG radius만 추가 제약.
+        # Absorbance 모드 + SimpleDeriv 없음: C# LogGapFeatureExtractor가 gap offset으로 밴드 접근
+        _sg_radius = 0
+        for _step in prep_chain:
+            _nm = _step.get('name', '')
+            if _nm == 'SG': _sg_radius = _step.get('params', {}).get('win', 5) // 2
+
+        _upper_offset = _sg_radius
+        if _upper_offset > 0:
+            _upper_limit = n_bands - _upper_offset
+            if 0 < _upper_limit < n_bands:
+                exclude_indices = list(set(exclude_indices) | set(range(_upper_limit, n_bands)))
+
         # Use Full Data for SPA (User Request: No Downsampling)
         dummy = X.reshape(-1, 1, X.shape[1])
         
@@ -251,7 +260,9 @@ class OptimizationWorker(QObject):
             model, metrics = learning.train_model(X_sub, y, model_type=self.model_type, test_ratio=0.2)
             # metrics['TestAccuracy'] is already 0~100 scale float
             return metrics['TestAccuracy']
-        except:
+        except Exception as e:
+            # AI가 수정함: bare except → Exception으로 변경, 실제 에러를 로그로 출력
+            self.log_message.emit(f"[Optimization Trial Error] {type(e).__name__}: {e}")
             return 0.0
 
     def stop(self):

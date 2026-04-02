@@ -1,6 +1,5 @@
 from PyQt5.QtCore import QObject, pyqtSignal
 import copy
-from config import get as cfg_get
 
 class OptimizationService(QObject):
     """
@@ -8,7 +7,6 @@ class OptimizationService(QObject):
     Implements Grid Search for (Band Count x Gap Size) to find Global Optimum.
     Strategies:
     1. Global Grid Search: Band Count (5~40) x Gap Size (1~40)
-    2. Fine Tuning: NDI Threshold
     """
     log_message = pyqtSignal(str)
     
@@ -28,7 +26,7 @@ class OptimizationService(QObject):
         history = []
         
         # Target Preprocessing Steps for Gap Tuning
-        target_keys = ["SimpleDeriv", "3PointDepth"]
+        target_keys = ["SimpleDeriv"]
         target_prep_name = None
         for step in best_params['prep']:
             if step['name'] in target_keys:
@@ -87,65 +85,19 @@ class OptimizationService(QObject):
         self.log_message.emit("-" * 40)
         self.log_message.emit(f"🏆 Optimization Done. Best: {best_acc:.2f}%")
         
-        # 3. Phase 2: NDI Threshold Fine-Tuning (Local Search)
-        # Only if SimpleDeriv is used
-        best_params, best_acc, ndi_step = self._optimize_ndi(best_params, best_acc, history, trial_callback)
-        
-        # 4. Final Report
+        # 3. Final Report
         self._generate_report(best_params, best_acc, history)
         
         return best_params, history
-
-    def _optimize_ndi(self, best_params, current_acc, history, trial_callback):
-        """Fine-tune NDI Threshold (Local Hill Climbing)."""
-        ndi_step = None
-        for step in best_params.get('prep', []):
-            if step['name'] == "SimpleDeriv" and step['params'].get('ratio', False):
-                ndi_step = step
-                break
-        
-        if not ndi_step:
-            return best_params, current_acc, None
-            
-        self.log_message.emit(f"\n[Final Phase] Fine-tuning NDI Threshold...")
-        start_th = ndi_step['params'].get('ndi_threshold', 1000.0)
-        self.log_message.emit(f"   Start Threshold: {start_th}")
-        
-        def ndi_evaluator(val):
-            p = copy.deepcopy(best_params)
-            for s in p['prep']:
-                if s['name'] == "SimpleDeriv":
-                    s['params']['ndi_threshold'] = val
-            acc = trial_callback(p)
-            history.append((copy.deepcopy(p), acc))
-            return acc, p
-
-        # Local Search (Hill Climbing)
-        best_th, th_acc, best_p_th = self.lookahead_hill_climbing(
-            start_val=start_th,
-            step=cfg_get('optimization', 'ndi_step', 100),
-            lookahead=cfg_get('optimization', 'ndi_lookahead', 3),
-            max_val=cfg_get('optimization', 'ndi_max_val', 2000),
-            evaluator=ndi_evaluator, initial_acc=current_acc, initial_params_obj=best_params
-        )
-        
-        if th_acc > current_acc:
-            self.log_message.emit(f" -> Found Better Threshold: {start_th} -> {best_th} (+{th_acc - current_acc:.2f}%)")
-            return best_p_th, th_acc, ndi_step
-        else:
-            self.log_message.emit(" -> No improvement on Threshold.")
-            return best_params, current_acc, ndi_step
 
     def _generate_report(self, best_params, current_acc, history):
         """Generate final optimization report."""
         report = ["\n🎉 Optimization Completed!", "-" * 40, "[Final Configuration]"]
         
-        target_keys = ["SimpleDeriv", "3PointDepth"]
+        target_keys = ["SimpleDeriv"]
         for step in best_params['prep']:
             if step['name'] in target_keys:
                 report.append(f" • Gap Size: {step['params'].get('gap')}")
-            if step['name'] == "SimpleDeriv" and step['params'].get('ratio'):
-                 report.append(f" • NDI Threshold: {step['params'].get('ndi_threshold')}")
 
         report.append(f" • Band Count: {best_params.get('n_features')}")
         report.extend(["-" * 40, f"🏆 Final Best Accuracy: {current_acc:.2f}%", "-" * 40, "📜 Top 3 Configurations"])
@@ -161,7 +113,6 @@ class OptimizationService(QObject):
             sig = (p['n_features'],)
             for s in p['prep']:
                 if s['name'] in target_keys: sig += (s['params'].get('gap'),)
-                if s['name'] == "SimpleDeriv" and s['params'].get('ratio'): sig += (s['params'].get('ndi_threshold'),)
             
             if sig not in seen:
                 seen.add(sig)
@@ -172,52 +123,8 @@ class OptimizationService(QObject):
             info = [f"Bands={p['n_features']}"]
             for s in p['prep']:
                 if s['name'] in target_keys: info.append(f"Gap={s['params'].get('gap')}")
-                if s['name'] == "SimpleDeriv" and s['params'].get('ratio'): info.append(f"Th={s['params'].get('ndi_threshold')}")
             medal = ["🥇", "🥈", "🥉"][i]
             report.append(f"{medal} #{i+1}: {acc:.2f}% | {', '.join(info)}")
 
         self.log_message.emit("\n".join(report))
 
-    def lookahead_hill_climbing(self, start_val, step, lookahead, max_val, evaluator, initial_acc=None, initial_params_obj=None):
-        """Generic Lookahead Walker."""
-        current_val = start_val
-        if initial_acc is not None and initial_params_obj is not None:
-             current_acc = initial_acc
-             current_full_params = initial_params_obj
-        else:
-             current_acc, current_full_params = evaluator(current_val)
-        
-        while True:
-            found_better = False
-            local_best_val = current_val
-            local_best_acc = current_acc
-            local_best_params = current_full_params
-            
-            candidates = []
-            for i in range(1, lookahead + 1):
-                next_val = current_val + (step * i)
-                if next_val > max_val: break
-                candidates.append(next_val)
-                
-            if not candidates: break
-            
-            self.log_message.emit(f"   👀 Fine-tuning Lookahead: {candidates}")
-            
-            for val in candidates:
-                acc, p_obj = evaluator(val)
-                # self.log_message.emit(f"    • Val={val}: {acc:.2f}%") # Too verbose?
-                if acc > local_best_acc:
-                    local_best_acc = acc
-                    local_best_val = val
-                    local_best_params = p_obj
-                    found_better = True
-            
-            if found_better:
-                self.log_message.emit(f"   🚀 Jump to {local_best_val} ({local_best_acc:.2f}%)")
-                current_val = local_best_val
-                current_acc = local_best_acc
-                current_full_params = local_best_params
-            else:
-                break
-                
-        return current_val, current_acc, current_full_params
