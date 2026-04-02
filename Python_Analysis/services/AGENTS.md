@@ -24,7 +24,7 @@ Central pipeline hub. **Single source of truth for all preprocessing.** Never ca
 | `convert_to_ref_flat` | `(flat, white_ref, dark_ref) → ndarray(N,B)` | Raw→Reflectance on flattened pixels |
 | `apply_preprocessing_chain` | `(flat_data, prep_chain) → ndarray(N,B')` | Applies chain list; raises `ValueError` on missing required params |
 
-Supported chain step names: `"SG"`, `"SimpleDeriv"`, `"SNV"`, `"L2"`, `"MinSub"`, `"MinMax"`, `"Center"`.
+Supported chain step names: `"SG"`, `"SimpleDeriv"`, `"SNV"`, `"L2"`, `"MinSub"`, `"MinMax"`.
 
 ### `band_selection_service.py`
 ```python

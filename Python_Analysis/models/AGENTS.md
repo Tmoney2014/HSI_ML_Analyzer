@@ -13,10 +13,9 @@ Pure mathematical functions implementing spectral preprocessing. **C# runtime pa
 | `apply_mask` | `(cube, mask)` → `ndarray (N,B)` | Flattened pixels | N/A |
 | `apply_absorbance` | `(data, epsilon)` → `ndarray` | Same as input | ✅ `-log10(R)` |
 | `apply_simple_derivative` | `(data, gap, order, apply_ratio, ndi_threshold)` → `ndarray (N, B-gap*order)` | Fewer bands | ✅ Gap-Diff |
-| `apply_rolling_3point_depth` | `(data, gap)` → `ndarray (N, B-2*gap)` | Fewer bands | ✅ Continuum Removal Lite |
+| ~~`apply_rolling_3point_depth`~~ | 미구현 | — | ❌ 미구현 (Python/C# 모두 없음) |
 | `apply_savgol` | `(data, window_size, poly_order, deriv)` → `ndarray` | Same as input | ✅ SG filter |
 | `apply_snv` | `(data)` → `ndarray` | Same as input | ❌ MROI-incompatible; `ddof=1` for C# SnvProcessor parity (`# AI가 수정됨`) |
-| `apply_mean_centering` | `(data)` → `ndarray` | Same as input | — |
 | `apply_min_subtraction` | `(data)` → `ndarray` | Same as input | — |
 | `apply_l2_norm` | `(data)` → `ndarray` | Same as input | — |
 | `apply_minmax_norm` | `(data)` → `ndarray` | Same as input | — |
@@ -33,9 +32,8 @@ Pure mathematical functions implementing spectral preprocessing. **C# runtime pa
 - With `apply_ratio=True`: NDI = `(B-A) / (B+A+ε)`
 - Band count shrinks by `gap × order` per call
 
-**`apply_rolling_3point_depth`:**
-- Formula: `1 - (C / ((L+R)/2))`  where L/R are gap-spaced shoulders
-- Band count shrinks by `2 × gap`
+**~~`apply_rolling_3point_depth`~~ (미구현):**
+- Python `processing.py` 및 C# 런타임 모두 구현되어 있지 않음 — 문서 오류였음
 
 ## CONVENTIONS
 
