@@ -224,7 +224,7 @@ class TrainingViewModel(QObject):
             'model_type': model_type,
             'test_ratio': test_ratio,
             'silent': silent,
-            'base_data_cache': self.cached_base_data,  # 통합된 캐시
+            'base_data_cache': dict(self.cached_base_data),  # AI가 수정함: race condition 방지 — snapshot copy 전달
             # AI가 추가함: Naming Metadata
             'model_name': self.model_name,
             'model_desc': self.model_desc,
@@ -373,7 +373,7 @@ class TrainingViewModel(QObject):
             self.main_vm.data_cache, 
             initial_params,
             model_type=model_type,  # AI가 수정함: 모델 타입 전달
-            base_data_cache=self.cached_base_data
+            base_data_cache=dict(self.cached_base_data)  # AI가 수정함: race condition 방지 — snapshot copy 전달
         )
         self.opt_worker.moveToThread(self.opt_thread)
         
