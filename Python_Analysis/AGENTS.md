@@ -25,6 +25,7 @@ Python_Analysis/
 |------|------|-------|
 | Config read | `config.py::get()` | `get('section.key', default=X)` |
 | Config write + persist | `config.py::set_value(), save()` | Writes settings.json |
+| Config reload from disk | `config.py::reload_config()` | Returns raw dict; call after external settings.json edit |
 | ENVI load | `services/data_loader.py` | Returns `(cube: ndarray H,W,B, waves: list)` |
 | Mode conversion | `services/processing_service.py::convert_to_ref()` | Raw→Ref; `convert_to_ref_flat()` for pixel arrays |
 | Full preprocessing | `services/processing_service.py::process_cube()` | Single-entry for all chain ops |

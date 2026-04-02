@@ -1,6 +1,6 @@
 # models/ — Pure Processing Functions
 
-**Generated:** 2026-03-10 | Single file: `processing.py` (248 lines)
+**Generated:** 2026-04-02 | Single file: `processing.py` (250 lines)
 
 ## OVERVIEW
 Pure mathematical functions implementing spectral preprocessing. **C# runtime parity required** — every function here must produce bit-identical results to the C# WPF inference engine.
@@ -15,7 +15,7 @@ Pure mathematical functions implementing spectral preprocessing. **C# runtime pa
 | `apply_simple_derivative` | `(data, gap, order, apply_ratio, ndi_threshold)` → `ndarray (N, B-gap*order)` | Fewer bands | ✅ Gap-Diff |
 | `apply_rolling_3point_depth` | `(data, gap)` → `ndarray (N, B-2*gap)` | Fewer bands | ✅ Continuum Removal Lite |
 | `apply_savgol` | `(data, window_size, poly_order, deriv)` → `ndarray` | Same as input | ✅ SG filter |
-| `apply_snv` | `(data)` → `ndarray` | Same as input | ❌ MROI-incompatible |
+| `apply_snv` | `(data)` → `ndarray` | Same as input | ❌ MROI-incompatible; `ddof=1` for C# SnvProcessor parity (`# AI가 수정됨`) |
 | `apply_mean_centering` | `(data)` → `ndarray` | Same as input | — |
 | `apply_min_subtraction` | `(data)` → `ndarray` | Same as input | — |
 | `apply_l2_norm` | `(data)` → `ndarray` | Same as input | — |

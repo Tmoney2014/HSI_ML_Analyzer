@@ -24,7 +24,7 @@ Central pipeline hub. **Single source of truth for all preprocessing.** Never ca
 | `convert_to_ref_flat` | `(flat, white_ref, dark_ref) → ndarray(N,B)` | Raw→Reflectance on flattened pixels |
 | `apply_preprocessing_chain` | `(flat_data, prep_chain) → ndarray(N,B')` | Applies chain list; raises `ValueError` on missing required params |
 
-Supported chain step names: `"SG"`, `"SimpleDeriv"`, `"3PointDepth"`, `"SNV"`, `"L2"`, `"MinSub"`, `"MinMax"`, `"Center"`.
+Supported chain step names: `"SG"`, `"SimpleDeriv"`, `"SNV"`, `"L2"`, `"MinSub"`, `"MinMax"`, `"Center"`.
 
 ### `band_selection_service.py`
 ```python
@@ -37,6 +37,8 @@ select_best_bands(
 ) -> (selected_indices: list[int], importance: ndarray, mean_spectrum: ndarray)
 ```
 SPA orthogonal projection band selection. Subsamples to `cfg_get('spa','max_samples',10000)`. Returns 0-based indices. Callers may pass `X.reshape(-1, 1, B)` — function handles both 2D and 3D input.
+
+`importance` return value = **orthogonal contribution norm at selection time** (actual SPA projection magnitude when each band was chosen). Used for `band_importance.png` visualization. Float guard: `v_norm_sq < 1e-12` prevents explosion on linearly dependent bands.
 
 ### `learning_service.py` — `LearningService`
 ```python
@@ -75,9 +77,9 @@ Full async training pipeline:
 6. Export: `LearningService.export_model(...)` → model.json
 
 ### `optimization_worker.py` — `OptimizationWorker(QObject)`
-**Signals:** `log_message(str)`, `optimization_finished(bool)`, `base_data_ready(str, tuple)`
+**Signals:** `progress_update(int)`, `log_message(str)`, `optimization_finished(bool)`, `data_ready(object, object)`, `base_data_ready(object, object)`
 
-Preloads all base data once (`_prepare_base_data`), then passes `trial_callback` to `OptimizationService.run_optimization()`. `trial_callback` applies prep chain + SPA + trains per candidate parameter set.
+Preloads all base data once (`_prepare_base_data`), then passes `trial_callback` to `OptimizationService.run_optimization()`. `trial_callback` applies prep chain + SPA + trains per candidate parameter set. `_prepare_base_data` uses `ProcessingService.get_base_data()` (mask + ref only, no prep chain) to populate the base data cache before optimization trials begin.
 
 ## CACHE HANDSHAKE (CRITICAL)
 
