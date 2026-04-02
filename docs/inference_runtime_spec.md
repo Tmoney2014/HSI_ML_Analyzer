@@ -55,7 +55,15 @@
 
 ### Step 1: Background Masking (Dynamic Rule)
 
-모델 설정의 `MaskRules` 문자열을 파싱하여 동적으로 마스킹 로직을 적용해야 합니다.
+마스킹은 런타임 설정 우선, 모델값 폴백 원칙으로 적용합니다.
+
+우선순위(권장/현행 런타임 반영):
+1. 런타임에서 사용자가 동적으로 바꾼 현재 마스크 상태
+2. model.json C# 전용 필드 (`MaskMode`, `MaskBandIndex`, `MaskLessThan`, `MaskThreshold`, `MaskRuleConditionsData`)
+3. model.json 공통 필드 (`MaskRules`, `Threshold`)
+4. 기본값 (`Mean`)
+
+모델 설정의 `MaskRules` 문자열은 폴백 경로에서 동적으로 파싱/적용해야 합니다.
 사용자는 검은 배경(`> Threshold`) 또는 알루미늄 배경(`< Threshold`)을 선택할 수 있으므로, 런타임은 부등호를 파싱하여 두 경우를 모두 지원해야 합니다.
 
 *   **Rule Format**: `b{BandIndex} {Operator} {Threshold}` (예: `b80 > 3000` 또는 `b80 < 50000`)
@@ -137,7 +145,7 @@
     *   파라미터: `Gap`, `DerivOrder` (보통 1)
     *   **Formula**: $D[i] = \text{Band}[i + \text{Gap}] - \text{Band}[i]$
         *   주의: Python 구현(`Right - Left`)과 일치해야 합니다. (Spec v1.0 수정사항)
-    *   `DerivOrder > 1`인 경우, 위 연산을 재귀적으로 반복.
+    *   현재 운영 제약: `DerivOrder == 1`만 허용.
 
 *   **3-Point Band Depth** (이름 주의)
     *   파라미터: `Gap`
@@ -224,12 +232,18 @@ List<ActiveBlob> activeBlobs = new List<ActiveBlob>();
 
 1.  **Zero Allocation**: 실시간 처리를 위해 `features` 배열 등은 픽셀마다 `new` 하지 말고, 미리 할당해둔 버퍼를 재사용하십시오.
 2.  **Thread Safety**: 여러 라인을 병렬 처리할 경우, `bestClass` 판별 로직(변수)이 스레드 간에 섞이지 않도록 지역 변수만 사용하십시오.
-3.  **Boundary Check**: `targetBand + Gap`이 전체 밴드 수(예: 224)를 넘지 않는지 초기화 단계에서 반드시 검증하십시오. (Python에선 이미 검증됨)
+3.  **Boundary Check**: `targetBand + Gap`이 전체 밴드 수를 넘는 경우 fail-fast로 처리하십시오. 런타임에서 clamp fallback으로 조용히 진행하면 패리티를 깨뜨릴 수 있습니다.
 4.  **Inverse Masking**: `ProcessingService`와 달리 C# 런타임은 알루미늄 배경을 전제로 하므로 `<` (Less Than) 연산자를 기본으로 지원해야 합니다.
 
 ---
 
-## 5. 성능 목표 (Performance Constraints)
+## 5. 제외 밴드(ExcludeBands) 계약
+
+- `ExcludeBands`는 학습(밴드 선택) 단계에서 반영되는 제안/기록 필드입니다.
+- 런타임 추론은 `ExcludeBands` 문자열을 직접 재해석하기보다, export 결과인 `SelectedBands`와 `RequiredRawBands`를 기준으로 동작하는 것이 일관적입니다.
+- 즉, 런타임에서 제외 밴드 반영 여부는 `SelectedBands/RequiredRawBands` 매핑으로 검증해야 합니다.
+
+## 6. 성능 목표 (Performance Constraints)
 
 *   **Target**: 1 Line (640 pixels) 처리 시간 < **1.0 ms**
 *   **Optimization**:

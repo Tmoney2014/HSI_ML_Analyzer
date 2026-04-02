@@ -30,7 +30,7 @@
 ### 🛡️ Rule 3. Runtime Compatibility (런타임 호환성)
 학습된 모델(`.json`)은 C# 런타임이 **별도의 Python 의존성 없이** 독립적으로 실행할 수 있어야 한다.
 - 이를 위해 모델 파일에는 `RequiredRawBands`, `Preprocessing Config` 등 **데이터를 재구성하기 위한 모든 메타데이터**가 포함되어야 한다.
-- 학습 시 `Exclude Bands` 등으로 제거된 밴드는 `RequiredRawBands` 목록에서 제외되어야 한다.
+- 학습 시 `Exclude Bands`는 밴드 선택 후보에서 제외되어야 하며, 그 결과가 `SelectedBands`/`RequiredRawBands`에 반영되어야 한다.
 
 ---
 
@@ -56,6 +56,12 @@
         - `Reflectance`: `(Raw - Dark) / (White - Dark)`. (0.0 ~ 1.0 Clip)
         - `Absorbance`: `-log10(Reflectance)`. (`Ref <= 0`인 경우 `1e-6`으로 치환 후 계산)
     - **Output**: `Base Data` (전처리가 적용되지 않은, 순수 반사율/흡광도 데이터)
+
+### 마스킹 설정 우선순위 메모 (Runtime 연동)
+
+- Python 학습기는 학습 시점의 `mask_rules/threshold`를 model.json에 기록한다.
+- C# 런타임에서는 운영 중 동적 마스킹 설정이 model 값보다 우선될 수 있다.
+- 따라서 model.json의 마스킹 정보는 “학습 당시 제안값/폴백값”으로 해석하는 것이 안전하다.
 
 ### Phase 2: Preprocessing Pipeline (The Engine)
 (사용자 설정에 따라 순차적으로 적용되는 필터 체인. `ProcessingService.apply_preprocessing_chain`)
