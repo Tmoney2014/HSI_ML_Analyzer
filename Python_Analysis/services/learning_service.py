@@ -276,9 +276,11 @@ class LearningService:
         
         # Convert prep_chain to flat format
         prep_flat = {
-            "ApplySG": False, "SGWin": 5, "SGPoly": 2,
+            "ApplySG": False, "SGWin": 5, "SGPoly": 2, "SGDeriv": 0,
             "ApplyDeriv": False, "Gap": 5, "DerivOrder": 1,
-            "ApplyL2": False, "ApplyMinMax": False, "ApplySNV": False, "ApplyCenter": False, "ApplyAbsorbance": (processing_mode == "Absorbance"),
+            "ApplyL2": False, "ApplyMinMax": False, "ApplySNV": False,
+            "ApplyCenter": False, "ApplyMinSub": False,
+            "ApplyAbsorbance": (processing_mode == "Absorbance"),
             "Mode": processing_mode,
             "MaskRules": mask_rules if mask_rules else "Mean",
             "Threshold": str(threshold) if threshold is not None else "0.0"
@@ -289,13 +291,15 @@ class LearningService:
                 name = step.get('name')
                 p = step.get('params', {})
                 if name == "SG":
-                    prep_flat["ApplySG"] = True; prep_flat["SGWin"] = p.get('win', 5); prep_flat["SGPoly"] = p.get('poly', 2)
+                    # AI가 수정함: SGDeriv 추가 — C# SavitzkyGolayProcessor 패리티
+                    prep_flat["ApplySG"] = True; prep_flat["SGWin"] = p.get('win', 5); prep_flat["SGPoly"] = p.get('poly', 2); prep_flat["SGDeriv"] = p.get('deriv', 0)
                 elif name == "SimpleDeriv":
                     prep_flat["ApplyDeriv"] = True; prep_flat["Gap"] = p.get('gap', 5); prep_flat["DerivOrder"] = p.get('order', 1)
                 elif name == "L2": prep_flat["ApplyL2"] = True
                 elif name == "MinMax": prep_flat["ApplyMinMax"] = True
                 elif name == "SNV": prep_flat["ApplySNV"] = True
                 elif name == "Center": prep_flat["ApplyCenter"] = True
+                elif name == "MinSub": prep_flat["ApplyMinSub"] = True  # AI가 추가함: MinSub export
                 # Absorbance is handled by Mode
         
         # AI가 수정함: RequiredRawBands 계산 로직 개선 (Deriv Order & SG Window 고려)
