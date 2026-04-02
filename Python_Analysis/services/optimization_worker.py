@@ -164,12 +164,12 @@ class OptimizationWorker(QObject):
                         cube = np.nan_to_num(cube)
                         
                         # Use Service to get valid pixels with Ref Conversion
-                        data, mask = ProcessingService.process_cube(
+                        # AI가 수정함: process_cube(prep_chain=[]) 대신 get_base_data() 사용 (training_worker와 동일 경로)
+                        data, mask = ProcessingService.get_base_data(
                             cube,
                             mode=self.processing_mode,
                             threshold=self.threshold,
                             mask_rules=self.mask_rules,
-                            prep_chain=[], 
                             white_ref=self.white_ref,
                             dark_ref=self.dark_ref
                         )

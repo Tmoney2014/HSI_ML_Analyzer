@@ -173,11 +173,6 @@ class ProcessingService:
                 )
             elif name == "SNV": 
                 flat_data = processing.apply_snv(flat_data)
-            elif name == "3PointDepth": 
-                flat_data = processing.apply_rolling_3point_depth(
-                    flat_data, 
-                    gap=ProcessingService._req(p, 'gap', '3PointDepth')
-                )
             elif name == "L2": 
                 flat_data = processing.apply_l2_norm(flat_data)
             elif name == "MinSub": 
