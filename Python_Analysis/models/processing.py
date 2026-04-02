@@ -162,8 +162,10 @@ def apply_simple_derivative(data, gap: int = 5, order: int = 1):
         diff_data: (N_pixels, New_Bands) 차분된 데이터
     """
     if gap < 1: return data
-    if order < 1:
-        raise ValueError(f"Strict Mode: Derivative order must be >= 1 (Got {order})")
+    if order != 1:
+        raise ValueError(
+            f"Strict Mode Error: Derivative order must be exactly 1 for Python↔C# runtime parity (Got {order})."
+        )
 
     diff_data = data.copy()
 

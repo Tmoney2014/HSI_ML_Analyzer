@@ -357,7 +357,13 @@ class LearningService:
                 elif name == "SNV": prep_flat["ApplySNV"] = True
                 elif name == "MinSub": prep_flat["ApplyMinSub"] = True  # AI가 추가함: MinSub export
                 # Absorbance is handled by Mode
-        
+
+        # AI가 수정함: Diff Gap 미분 차수 고정(1차만 허용) — Python↔C# 패리티 강제
+        if prep_flat.get("ApplyDeriv", False) and int(prep_flat.get("DerivOrder", 1)) != 1:
+            raise ValueError(
+                f"Export Error: DerivOrder must be exactly 1 for runtime parity (Got {prep_flat.get('DerivOrder')})."
+            )
+
         # AI가 수정함: RequiredRawBands 계산 로직 개선 (Deriv Order & SG Window 고려)
         # Logic:
         # 1. Deriv(미분)가 있다면, 차수(Order)만큼 Base Band가 늘어남. (e.g. Band, Band+Gap, Band+2*Gap...)
