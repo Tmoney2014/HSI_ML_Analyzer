@@ -151,34 +151,43 @@ class AnalysisViewModel(QObject):
         return list(indices)
         
     def add_step(self, step_name, params=None):
-        step = {"name": step_name, "params": params or {}}
-        self.prep_chain.append(step)
+        # AI가 수정함: prep_chain은 property(새 리스트 반환)이므로 _full_state 직접 조작
+        step = {"name": step_name, "params": params or {}, "enabled": True}
+        self._full_state.append(step)
         self._invalidate_processing()
         self.params_changed.emit()
         self.model_updated.emit()
         
     def remove_step(self, index):
-        if 0 <= index < len(self.prep_chain):
-            del self.prep_chain[index]
+        # AI가 수정함: _full_state의 enabled 스텝 기준 index로 제거
+        enabled_indices = [i for i, s in enumerate(self._full_state) if s.get("enabled", False)]
+        if 0 <= index < len(enabled_indices):
+            del self._full_state[enabled_indices[index]]
             self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()
             
     def move_step(self, index, direction):
+        # AI가 수정함: _full_state의 enabled 스텝 기준 index로 이동
+        enabled_indices = [i for i, s in enumerate(self._full_state) if s.get("enabled", False)]
         if direction == -1 and index > 0:
-            self.prep_chain[index], self.prep_chain[index-1] = self.prep_chain[index-1], self.prep_chain[index]
+            i, j = enabled_indices[index], enabled_indices[index - 1]
+            self._full_state[i], self._full_state[j] = self._full_state[j], self._full_state[i]
             self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()
-        elif direction == 1 and index < len(self.prep_chain) - 1:
-            self.prep_chain[index], self.prep_chain[index+1] = self.prep_chain[index+1], self.prep_chain[index]
+        elif direction == 1 and index < len(enabled_indices) - 1:
+            i, j = enabled_indices[index], enabled_indices[index + 1]
+            self._full_state[i], self._full_state[j] = self._full_state[j], self._full_state[i]
             self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()
 
     def update_params(self, index, new_params):
-        if 0 <= index < len(self.prep_chain):
-            self.prep_chain[index]['params'] = new_params
+        # AI가 수정함: prep_chain은 property(새 리스트 반환)이므로 _full_state 직접 조작
+        enabled_indices = [i for i, s in enumerate(self._full_state) if s.get("enabled", False)]
+        if 0 <= index < len(enabled_indices):
+            self._full_state[enabled_indices[index]]['params'] = new_params
             self._invalidate_processing()
             self.params_changed.emit()
             self.model_updated.emit()

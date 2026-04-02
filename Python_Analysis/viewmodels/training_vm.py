@@ -57,6 +57,9 @@ class TrainingViewModel(QObject):
         # AI가 추가함: 제외할 파일 목록
         self.excluded_files = set()
         
+        # AI가 추가함: 최적화 결과 저장 (최적화 완료 전 UI 접근 시 AttributeError 방지)
+        self.best_n_features = self.n_features
+        
         # Cache Invalidation: When underlying data changes, clear caches
         # AI가 수정함: params_changed 대신 base_data_invalidated 연결 (Gap 변경 시 무효화 방지)
         self.analysis_vm.base_data_invalidated.connect(self._invalidate_base_cache)
@@ -234,7 +237,8 @@ class TrainingViewModel(QObject):
         
         # 4. Create Thread
         self.worker_thread = QThread()
-        groups_copy = self.main_vm.file_groups.copy()
+        # AI가 수정함: shallow copy → deep copy — 훈련 중 메인 스레드의 file_groups 수정 시 race condition 방지
+        groups_copy = {k: list(v) for k, v in self.main_vm.file_groups.items()}
         
         # AI가 수정함: precomputed_data 제거, base_data_cache만 사용
         self.worker = TrainingWorker(
@@ -296,6 +300,10 @@ class TrainingViewModel(QObject):
         
         # 2. Thread 정리
         if self.worker_thread:
+            # AI가 수정함: V2-DLT — Qt 객체 결정론적 해제 (deleteLater 패턴)
+            if self.worker:
+                self.worker_thread.finished.connect(self.worker.deleteLater)
+            self.worker_thread.finished.connect(self.worker_thread.deleteLater)
             self.worker_thread.quit()
         
         # 3. 다음 이벤트 루프에서 참조 정리 (안전)
@@ -364,7 +372,8 @@ class TrainingViewModel(QObject):
         
         # 3. Create Worker & Thread
         self.opt_thread = QThread()
-        groups_copy = self.main_vm.file_groups.copy()
+        # AI가 수정함: shallow copy → deep copy — 최적화 중 메인 스레드의 file_groups 수정 시 race condition 방지
+        groups_copy = {k: list(v) for k, v in self.main_vm.file_groups.items()}
         
         # AI가 수정함: 통합된 캐시 사용
         self.opt_worker = OptimizationWorker(
@@ -437,6 +446,10 @@ class TrainingViewModel(QObject):
         
         # 3. Thread 정리
         if self.opt_thread:
+            # AI가 수정함: V2-DLT — Qt 객체 결정론적 해제 (deleteLater 패턴)
+            if self.opt_worker:
+                self.opt_thread.finished.connect(self.opt_worker.deleteLater)
+            self.opt_thread.finished.connect(self.opt_thread.deleteLater)
             self.opt_thread.quit()
         
         # 4. 다음 이벤트 루프에서 참조 정리
