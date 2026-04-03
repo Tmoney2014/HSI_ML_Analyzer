@@ -73,7 +73,8 @@ class OptimizationWorker(QObject):
             # Run the generic optimization algorithm
             best_params, history = self.service.run_optimization(self.initial_params, self.trial_callback)
             
-            self.log_message.emit(f"=== Optimization Finished. Best Accuracy: {history[-1][1]:.2f}% ===")
+            actual_best_acc = max((acc for _, acc in history), default=0.0)  # AI가 수정함: 마지막 trial이 아닌 실제 최고 정확도 계산
+            self.log_message.emit(f"=== Optimization Finished. Best Accuracy: {actual_best_acc:.2f}% ===")  # AI가 수정함: max() 기반 best accuracy 사용
             
             self.best_params = best_params
             

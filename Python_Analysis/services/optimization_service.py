@@ -34,23 +34,35 @@ class OptimizationService(QObject):
                 break
         
         # 1. Setup Search Space
-        band_start, band_end, band_step = 5, 40, 5
-        
+        band_start, band_end, band_step = 5, 40, 5  # AI가 수정함: Band Count 검색 범위 고정
+        is_full_band = initial_params.get('band_selection_method') == 'full'  # AI가 수정함: Full Band 모드 감지
+        if is_full_band:  # AI가 수정함: Full Band는 n_features를 무시하므로 단일 값만 사용
+            band_range = [initial_params.get('n_features', band_start)]  # AI가 수정함: Band Count 단일 trial로 축소
+        else:  # AI가 수정함: SPA 등 일반 모드에서는 기존 그리드 유지
+            band_range = range(band_start, band_end + 1, band_step)  # AI가 수정함: 기존 Band Count 그리드 유지
+
         if target_prep_name:
-            self.log_message.emit("Target: Find best combination of [Band Count] and [Gap Size]")
+            self.log_message.emit("Target: Find best combination of [Band Count] and [Gap Size]")  # AI가 수정함: 기존 목적 로그 유지
             gap_range = range(1, 41) # Gap 1~40
-            self.log_message.emit(f"Search Space: Bands {band_start}~{band_end} x Gap 1~40 = ~320 trials")
+            if is_full_band:  # AI가 수정함: Full Band면 Band Count 탐색 생략
+                self.log_message.emit("ℹ️ Full Band mode: skipping Band Count search (using all bands)")  # AI가 수정함: Band Count 반복 제거 안내
+                self.log_message.emit(f"Search Space: Full Band × Gap 1~40 = {len(gap_range)} trials")  # AI가 수정함: 실제 trial 수 반영
+            else:  # AI가 수정함: SPA 경로는 기존 메시지 유지
+                self.log_message.emit(f"Search Space: Bands {band_start}~{band_end} x Gap 1~40 = ~320 trials")  # AI가 수정함: 기존 추정 trial 수 유지
         else:
-            self.log_message.emit("⚠️ No Gap-tunable preprocessing found. Switching to [Band-Only Optimization].")
-            self.log_message.emit("Target: Find best [Band Count]")
+            self.log_message.emit("⚠️ No Gap-tunable preprocessing found. Switching to [Band-Only Optimization].")  # AI가 수정함: 기존 동작 유지
+            self.log_message.emit("Target: Find best [Band Count]")  # AI가 수정함: 기존 동작 유지
             gap_range = [0] # Dummy Gap (No change)
-            self.log_message.emit(f"Search Space: Bands {band_start}~{band_end}")
+            if is_full_band:  # AI가 수정함: Full Band 단일 trial 안내
+                self.log_message.emit("ℹ️ Full Band mode: single trial (no variable parameters)")  # AI가 수정함: Full Band는 단일 trial
+            else:  # AI가 수정함: SPA 경로는 기존 메시지 유지
+                self.log_message.emit(f"Search Space: Bands {band_start}~{band_end}")  # AI가 수정함: 기존 Band Count 검색 안내
 
         self.log_message.emit("-" * 40)
         
         # 2. Optimization Loop
-        for n_features in range(band_start, band_end + 1, band_step):
-            self.log_message.emit(f"Checking Band Count: {n_features}...")
+        for n_features in band_range:  # AI가 수정함: Full Band일 때 단일값, SPA일 때 전체 그리드 반복
+            self.log_message.emit(f"Checking Band Count: {n_features}...")  # AI가 수정함: Band Count trial 로그 유지
             
             for gap in gap_range:
                 # Construct Params
