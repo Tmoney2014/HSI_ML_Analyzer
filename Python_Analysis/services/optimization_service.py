@@ -62,7 +62,8 @@ class OptimizationService(QObject):
         
         # 2. Optimization Loop
         for n_features in band_range:  # AI가 수정함: Full Band일 때 단일값, SPA일 때 전체 그리드 반복
-            self.log_message.emit(f"Checking Band Count: {n_features}...")  # AI가 수정함: Band Count trial 로그 유지
+            if not is_full_band:  # AI가 수정함: Full Band는 이미 상단에서 안내했으므로 생략
+                self.log_message.emit(f"Checking Band Count: {n_features}...")  # AI가 수정함: Band Count trial 로그 유지
             
             for gap in gap_range:
                 # Construct Params
@@ -81,18 +82,19 @@ class OptimizationService(QObject):
                 history.append((copy.deepcopy(p), acc))
                 
                 # Update Best
+                band_label = "Full Band" if is_full_band else n_features  # AI가 수정함: Full Band 표시
                 if acc > best_acc:
                     diff = acc - best_acc
                     best_acc = acc
                     best_params = p
-                    msg = f"✨ New Best! {acc:.2f}% (+{diff:.2f}%) | Bands={n_features}"
+                    msg = f"✨ New Best! {acc:.2f}% (+{diff:.2f}%) | Bands={band_label}"  # AI가 수정함: 조건부 표시
                     if target_prep_name: msg += f", Gap={gap}"
                     self.log_message.emit(msg)
                 else:
                      if target_prep_name:
                          self.log_message.emit(f"   • Gap={gap}: {acc:.2f}%")
                      else:
-                         self.log_message.emit(f"   • Bands={n_features}: {acc:.2f}%")
+                         self.log_message.emit(f"   • Bands={band_label}: {acc:.2f}%")  # AI가 수정함: Full Band 표시
         
         self.log_message.emit("-" * 40)
         self.log_message.emit(f"🏆 Optimization Done. Best: {best_acc:.2f}%")
@@ -111,7 +113,11 @@ class OptimizationService(QObject):
             if step['name'] in target_keys:
                 report.append(f" • Gap Size: {step['params'].get('gap')}")
 
-        report.append(f" • Band Count: {best_params.get('n_features')}")
+        is_full_band = best_params.get('band_selection_method') == 'full'  # AI가 수정함: Full Band 감지
+        if is_full_band:  # AI가 수정함: Full Band이면 전체 밴드 표시
+            report.append(" • Band Count: Full Band")  # AI가 수정함:
+        else:  # AI가 수정함: SPA 등은 기존 표시 유지
+            report.append(f" • Band Count: {best_params.get('n_features')}")  # AI가 수정함:
         report.extend(["-" * 40, f"🏆 Final Best Accuracy: {current_acc:.2f}%", "-" * 40, "📜 Top 3 Configurations"])
         
         # Sort by Accuracy
@@ -132,7 +138,7 @@ class OptimizationService(QObject):
             if len(unique_top) >= 3: break
             
         for i, (p, acc) in enumerate(unique_top):
-            info = [f"Bands={p['n_features']}"]
+            info = ["Bands=Full Band" if is_full_band else f"Bands={p['n_features']}"]  # AI가 수정함: Full Band 표시
             for s in p['prep']:
                 if s['name'] in target_keys: info.append(f"Gap={s['params'].get('gap')}")
             medal = ["🥇", "🥈", "🥉"][i]

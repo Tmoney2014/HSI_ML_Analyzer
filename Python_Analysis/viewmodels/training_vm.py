@@ -443,7 +443,8 @@ class TrainingViewModel(QObject):
             if hasattr(self.opt_worker, 'best_params'):
                 best_params = self.opt_worker.best_params
                 self.analysis_vm.set_preprocessing_chain(best_params['prep'])
-                self.best_n_features = best_params.get('n_features', 5)
+                if best_params.get('band_selection_method') != 'full':  # AI가 수정함: Full Band는 스피너 업데이트 불필요
+                    self.best_n_features = best_params.get('n_features', 5)  # AI가 수정함: SPA 등 일반 모드만 업데이트
             
             # AI가 수정함: 캐시 덮어쓰기 삭제 (Dict 유지)
             # OptimizationWorker는 파일별로 base_data_ready를 방출하므로 자동 캐싱됨.
