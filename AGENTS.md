@@ -1,7 +1,7 @@
 # HSI ML Analyzer - Knowledge Base
 
-**Generated:** 2026-04-02  
-**Commit:** a7921ea  
+**Generated:** 2026-04-03  
+**Commit:** be1e3ae  
 **Branch:** main
 
 ## OVERVIEW
@@ -32,6 +32,9 @@ HSI_ML_Analyzer/
 | `Python_Analysis/services/` | `services/AGENTS.md` | Pipeline orchestration + workers |
 | `Python_Analysis/viewmodels/` | `viewmodels/AGENTS.md` | MVVM state + cache invalidation |
 | `Python_Analysis/views/` | `views/AGENTS.md` | UI wiring and tab/dialog/component rules |
+| `Python_Analysis/views/tabs/` | `views/tabs/AGENTS.md` | Tab widgets: data, analysis, training | <!-- AI가 수정함: 누락된 서브디렉토리 항목 추가 -->
+| `Python_Analysis/views/components/` | `views/components/AGENTS.md` | ImageViewer + CustomToolbar components | <!-- AI가 수정함: 누락된 서브디렉토리 항목 추가 -->
+| `Python_Analysis/views/dialogs/` | `views/dialogs/AGENTS.md` | Modal dialogs: preprocessing, welcome | <!-- AI가 수정함: 누락된 서브디렉토리 항목 추가 -->
 
 ## WHERE TO LOOK
 

@@ -1,6 +1,6 @@
 # docs/ - Design Spec Map
 
-**Generated:** 2026-04-02  
+**Generated:** 2026-04-03  
 **Scope:** `docs/` only
 
 ## OVERVIEW
