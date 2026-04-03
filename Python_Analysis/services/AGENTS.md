@@ -1,6 +1,6 @@
 # services/ — Business Logic Layer
 
-**Generated:** 2026-03-10
+**Generated:** 2026-04-03 <!-- AI가 수정함: 날짜 갱신 -->
 
 ## OVERVIEW
 Orchestrates the full HSI training pipeline. Services are UI-agnostic; workers are QObject subclasses moved to QThread for >100ms operations.
@@ -31,7 +31,7 @@ Supported chain step names: `"SG"`, `"SimpleDeriv"`, `"SNV"`, `"L2"`, `"MinSub"`
 select_best_bands(
     data_cube: ndarray,   # (H,W,B) or (N,B)
     n_bands: int = 5,
-    method: str = 'spa',  # 'spa' | 'variance'
+    method: str = 'spa',  # 'spa' | 'full' <!-- AI가 수정함: 'variance'→'full' (실제 코드 기준) -->
     exclude_indices: list = None,
     keep_order: bool = False
 ) -> (selected_indices: list[int], importance: ndarray, mean_spectrum: ndarray)
@@ -63,7 +63,7 @@ export_model(model, selected_bands, output_path, preprocessing_config=None,
 run_optimization(initial_params: dict, trial_callback: callable) → (best_params, history)
 lookahead_hill_climbing(start_val, step, lookahead, max_val, evaluator, ...) → (best_val, best_acc, best_params)
 ```
-Grid searches Band Count × Gap Size; fine-tunes NDI threshold via `lookahead_hill_climbing`. `trial_callback(params) → float score` is provided by `OptimizationWorker`.
+Grid searches Band Count × Gap Size; fine-tunes NDI threshold via `lookahead_hill_climbing`. `trial_callback(params) → float score` is provided by `OptimizationWorker`. Full Band 모드(`method='full'`)에서는 로그에 `Bands=Full Band`로 출력 (숫자 없음) <!-- AI가 수정함: Full Band 로그 형식 명시 -->.
 
 ### `training_worker.py` — `TrainingWorker(QObject)`
 **Signals:** `progress_update(int)`, `log_message(str)`, `training_finished(bool)`, `base_data_ready(str, tuple)`

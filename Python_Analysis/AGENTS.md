@@ -1,6 +1,6 @@
 # Python_Analysis - Development Guide
 
-**Generated:** 2026-03-10 | **Commit:** 98a35c4
+**Generated:** 2026-04-03 | **Commit:** be1e3ae
 
 ## OVERVIEW
 Core PyQt5 application for training hardware-aware HSI sorting models. MVVM architecture with strict layer separation.
@@ -30,7 +30,7 @@ Python_Analysis/
 | Mode conversion | `services/processing_service.py::convert_to_ref()` | Raw→Ref; `convert_to_ref_flat()` for pixel arrays |
 | Full preprocessing | `services/processing_service.py::process_cube()` | Single-entry for all chain ops |
 | Background masking | `models/processing.py::create_background_mask()` | Always call on Raw cube |
-| SPA band selection | `services/band_selection_service.py::select_best_bands()` | Returns `(bands, scores, mean_spectrum)` |
+| SPA band selection | `services/band_selection_service.py::select_best_bands()` | Returns `(bands, scores, mean_spectrum)`; `method='spa'`\|`'full'` <!-- AI가 수정함: 지원 method 값 정정 ('variance'→'full') --> |
 | Model train + export | `services/learning_service.py` | `train_model()` → `export_model()` → model.json |
 | Auto-ML loop | `services/optimization_service.py` | Grid-searches Gap, NDI threshold, band count |
 | Async train | `services/training_worker.py::TrainingWorker` | Emits `base_data_ready` per file for L3 cache |

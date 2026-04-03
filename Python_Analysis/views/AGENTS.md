@@ -1,6 +1,6 @@
 # Views Layer
 
-**Generated:** 2026-03-10 | **Commit:** 98a35c4
+**Generated:** 2026-04-03 | **Commit:** be1e3ae <!-- AI가 수정함: 날짜·커밋 갱신, tab_analysis LOC 651→610 -->
 
 ## STRUCTURE
 
@@ -9,7 +9,7 @@ views/
 ├── main_window.py                  # QMainWindow; sole VM creation + injection point
 ├── tabs/
 │   ├── tab_data.py                 # Group/file management, ref setup, mode toggle
-│   ├── tab_analysis.py             # Spectrum viz, preprocessing config (651 lines)
+│   ├── tab_analysis.py             # Spectrum viz, preprocessing config (610 lines) <!-- AI가 수정함: LOC 651→610 -->
 │   └── tab_training.py             # Training config, log, file tree
 ├── components/
 │   ├── image_viewer.py             # Single-file HSI image + pixel spectrum viewer

@@ -1,6 +1,6 @@
 # viewmodels/ — MVVM State Layer
 
-**Generated:** 2026-03-10
+**Generated:** 2026-04-03 <!-- AI가 수정함: 날짜 갱신 -->
 
 ## OVERVIEW
 Three ViewModels form a dependency chain. Instantiated once in `MainWindow.__init__` and injected into Views via constructor. Never instantiate VMs in service or model code.
@@ -69,6 +69,8 @@ Orchestrates async training and optimization workers.
 | `model_type` | `str` | `"Linear SVM"` / `"LDA"` / `"PLS-DA"` |
 | `val_ratio` | `float` | Train/validation split |
 | `n_features` | `int` | Target band count for SPA |
+| `band_selection_method` | `str` | `'spa'` (default) / `'full'` — band selection strategy <!-- AI가 수정함: 누락된 속성 추가 --> |
+| `best_n_features` | `int` | Optimization 완료 후 설정되는 최적 밴드 수; `'full'` 모드에서는 spinner 갱신 생략 <!-- AI가 수정함: 누락된 속성 추가 --> |
 | `output_folder`, `model_name` | `str` | Path components; `full_output_path` property combines them |
 | `excluded_files` | `set[str]` | Files excluded from training labels |
 | `cached_base_data` | `dict[str, tuple]` | L3 cache: path → `(X_base, y)` |
@@ -87,6 +89,7 @@ Orchestrates async training and optimization workers.
 - **Signal debouncing:** `params_changed` triggers auto-save via `QTimer.singleShot` in MainWindow
 - **`base_data_invalidated` vs `params_changed`:** Only threshold/mask changes invalidate L3 cache; Gap/prep chain changes do NOT (only invalidate L2 visualization)
 - **Thread safety:** Never access `cached_base_data` from worker threads directly — workers emit `base_data_ready` signal, VM receives it on main thread
+- **`band_selection_method == 'full'`:** `best_n_features` 속성이 설정되어도 `TabTraining.on_finished()`에서 `spin_bands` spinner 갱신을 건너뜀 — Full Band 모드에서는 밴드 수가 무의미하므로 <!-- AI가 수정함: Full Band guard 동작 명시 -->
 
 ## ANTI-PATTERNS
 

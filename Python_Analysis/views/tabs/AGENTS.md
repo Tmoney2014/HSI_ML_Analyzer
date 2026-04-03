@@ -1,14 +1,14 @@
 # Views / Tabs Layer
 
-**Generated:** 2026-03-10 | **Commit:** 98a35c4
+**Generated:** 2026-04-03 | **Commit:** be1e3ae <!-- AI가 수정함: 날짜·커밋 갱신 -->
 
 ## FILES
 
 | File | Class(es) | LOC | VM(s) |
 |------|-----------|-----|-------|
-| `tab_data.py` | `ClassListWidget`, `TabData` | 418 | `MainViewModel` |
-| `tab_analysis.py` | `TabAnalysis` | 652 | `MainViewModel` + `AnalysisViewModel` |
-| `tab_training.py` | `TabTraining` | 305 | `TrainingViewModel` |
+| `tab_data.py` | `ClassListWidget`, `TabData` | 398 | `MainViewModel` | <!-- AI가 수정함: LOC 418→398 (실측값) -->
+| `tab_analysis.py` | `TabAnalysis` | 610 | `MainViewModel` + `AnalysisViewModel` | <!-- AI가 수정함: LOC 652→610 (실측값) -->
+| `tab_training.py` | `TabTraining` | 316 | `TrainingViewModel` | <!-- AI가 수정함: LOC 305→316 (실측값) -->
 
 ---
 
@@ -30,7 +30,7 @@
 
 ---
 
-## tab_analysis.py — Central analysis tab (652 lines)
+## tab_analysis.py — Central analysis tab (610 lines) <!-- AI가 수정함: LOC 652→610 -->
 
 ### Key state
 ```python
@@ -113,7 +113,7 @@ File checkboxes only (items with `Qt.UserRole` path set).
 - `on_start_click()` → clears log → `vm.run_training()` (no args — VM is source of truth)
 - `on_optimize_click()` → clears log → `vm.run_optimization()`
 - Both disable buttons via `set_buttons_enabled(False)` during run
-- `on_finished(success)`: re-enables buttons; if `vm.best_n_features` is set, syncs `spin_bands` and clears it (one-shot)
+- `on_finished(success)`: re-enables buttons; if `vm.best_n_features` is set **and** `vm.band_selection_method != 'full'`, syncs `spin_bands` and clears it (one-shot); Full Band 모드에서는 spinner 갱신 건너뜀 <!-- AI가 수정함: Full Band 모드 guard 추가 -->
 
 ### Signals consumed
 - `vm.log_message` → `append_log(msg)` (green console)

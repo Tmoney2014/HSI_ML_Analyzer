@@ -1,6 +1,6 @@
 # views/components/ — Reusable Widget Components
 
-**Generated:** 2026-04-02
+**Generated:** 2026-04-03 <!-- AI가 수정함: 날짜 갱신, image_viewer.py LOC 296→278 -->
 
 ## OVERVIEW
 Two UI components: a complex multi-panel HSI image viewer (allowed MVVM exception) and a minimal Matplotlib toolbar subclass.
@@ -9,7 +9,7 @@ Two UI components: a complex multi-panel HSI image viewer (allowed MVVM exceptio
 
 | File | Class | Base | LOC | VM |
 |------|-------|------|-----|----|
-| `image_viewer.py` | `ImageViewer` | `QWidget` | 296 | `AnalysisViewModel` (read-only) |
+| `image_viewer.py` | `ImageViewer` | `QWidget` | 278 | `AnalysisViewModel` (read-only) | <!-- AI가 수정함: LOC 296→278 (실측값) -->
 | `custom_toolbar.py` | `CustomToolbar` | `NavigationToolbar2QT` | ~16 | none |
 
 ---
