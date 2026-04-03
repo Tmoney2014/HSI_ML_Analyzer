@@ -86,6 +86,15 @@ class TabTraining(QWidget):
         hbox_bands.addWidget(self.spin_bands)
         vbox.addLayout(hbox_bands)
         
+        # AI가 수정함: Band Selection Method 선택 UI
+        hbox_band_method = QHBoxLayout()
+        hbox_band_method.addWidget(QLabel("Band Selection:"))
+        self.combo_band_method = QComboBox()
+        self.combo_band_method.addItems(["SPA", "Variance"])
+        self.combo_band_method.setToolTip("SPA: Successive Projections (orthogonal), Variance: High-variance band selection")
+        hbox_band_method.addWidget(self.combo_band_method)
+        vbox.addLayout(hbox_band_method)
+        
         grp_idx.setLayout(vbox)
         
         # AI가 수정함: 상단 설정창은 높이 고정 (늘어나지 않음)
@@ -162,6 +171,7 @@ class TabTraining(QWidget):
         self.btn_optimize.setEnabled(enabled)
         self.combo_model.setEnabled(enabled)
         self.spin_ratio.setEnabled(enabled)
+        self.combo_band_method.setEnabled(enabled)  # AI가 수정함: 훈련 중 비활성화
 
     def on_start_click(self):
         # AI가 수정함: 별도 저장 불필요 (Auto-Save 됨)
@@ -196,6 +206,10 @@ class TabTraining(QWidget):
             
             self.spin_ratio.setValue(self.vm.val_ratio)
             self.spin_bands.setValue(self.vm.n_features)
+            # AI가 수정함: Band Selection Method 복원
+            _method_display = {"spa": "SPA", "variance": "Variance"}
+            idx = self.combo_band_method.findText(_method_display.get(self.vm.band_selection_method, "SPA"))
+            if idx >= 0: self.combo_band_method.setCurrentIndex(idx)
         finally:
             self.blockSignals(False)
             
@@ -262,6 +276,9 @@ class TabTraining(QWidget):
         self.vm.model_type = self.combo_model.currentText()
         self.vm.val_ratio = self.spin_ratio.value()
         self.vm.n_features = self.spin_bands.value()
+        # AI가 수정함: Band Selection Method VM 동기화
+        _method_map = {"SPA": "spa", "Variance": "variance"}
+        self.vm.band_selection_method = _method_map.get(self.combo_band_method.currentText(), "spa")
         
         self.vm.config_changed.emit() # Notify Main Window to Save
 
@@ -274,6 +291,7 @@ class TabTraining(QWidget):
         self.combo_model.currentIndexChanged.connect(self._on_ui_changed)
         self.spin_ratio.valueChanged.connect(self._on_ui_changed)
         self.spin_bands.valueChanged.connect(self._on_ui_changed)
+        self.combo_band_method.currentIndexChanged.connect(self._on_ui_changed)  # AI가 수정함
 
     def append_log(self, msg):
         self.log_text.append(msg)

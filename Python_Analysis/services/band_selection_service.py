@@ -28,6 +28,8 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         X = data_cube
         
     n_features = X.shape[1]
+    if method not in ('spa', 'variance'):  # AI가 수정함: unknown method 검증
+        raise ValueError(f"Unknown band selection method: {method!r}. Must be 'spa' or 'variance'.")
     
     # Handle Exclusion
     valid_indices = np.arange(n_features)
@@ -112,8 +114,7 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
             
             if v_norm_sq < 1e-12: 
                 # AI가 수정함: 부동소수점 안전 비교 (정확한 0 비교 시 선형 종속 밴드에서 투영값 폭발 위험)
-                print(f"Warning: SPA Numerical Singularity at iter {k}. Stopping selection early.")
-                break # Numerical issue
+                break # Numerical issue — silent early stop (print() removed: service layer has no log callback)
             
             # Projection Operator: proj(y) = (v.T @ y / v.T @ v) * v
             # Matrix form: P_new = P - v @ (v.T @ P / v.T @ v)

@@ -42,6 +42,7 @@ class TrainingViewModel(QObject):
         self.model_type = "Linear SVM"
         self.val_ratio = 0.20
         self.n_features = 5
+        self.band_selection_method = "spa"  # AI가 수정함: 밴드 선택 방법 (기본값 SPA)
         
         # Threading state
         self.worker_thread = None
@@ -83,6 +84,7 @@ class TrainingViewModel(QObject):
             "model_type": self.model_type,
             "val_ratio": self.val_ratio,
             "n_features": self.n_features,
+            "band_selection_method": self.band_selection_method,  # AI가 수정함: 밴드 선택 방법 저장
             # AI가 추가함: 제외 목록 저장 (list로 변환)
             "excluded_files": list(self.excluded_files)
         }
@@ -115,6 +117,7 @@ class TrainingViewModel(QObject):
         except ValueError:
             self.val_ratio = 0.20
             self.n_features = 5
+        self.band_selection_method = config.get("band_selection_method", "spa")  # AI가 수정함: backward compat
             
         # AI가 추가함: 제외 목록 복원
         if "excluded_files" in config:
@@ -232,7 +235,8 @@ class TrainingViewModel(QObject):
             'model_name': self.model_name,
             'model_desc': self.model_desc,
             # AI가 추가함: 제외 목록 전달
-            'excluded_files': self.excluded_files.copy()
+            'excluded_files': self.excluded_files.copy(),
+            'band_selection_method': self.band_selection_method,  # AI가 수정함: 하드코딩 제거
         }
         
         # 4. Create Thread
@@ -367,7 +371,8 @@ class TrainingViewModel(QObject):
             'prep': prep_chain_copy,
             'n_features': n_features, # AI가 수정함: UI 값 사용
             # AI가 추가함: 제외 목록 전달
-            'excluded_files': self.excluded_files.copy()
+            'excluded_files': self.excluded_files.copy(),
+            'band_selection_method': self.band_selection_method,  # AI가 수정함: 하드코딩 제거
         }
         
         # 3. Create Worker & Thread

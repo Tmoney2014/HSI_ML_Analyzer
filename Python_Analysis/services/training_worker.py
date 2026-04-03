@@ -55,6 +55,7 @@ class TrainingWorker(QObject):
             model_type = self.params['model_type']
             test_ratio = self.params['test_ratio']
             silent = self.params.get('silent', False)
+            band_method = self.params.get('band_selection_method', 'spa')  # AI가 수정함: 하드코딩 제거
             
             # AI가 추가함: Naming Metadata
             model_name = self.params.get('model_name', 'model')
@@ -78,7 +79,7 @@ class TrainingWorker(QObject):
             self.progress_update.emit(60)
 
             # 3. Band Selection
-            if not silent: self.log_message.emit(f"Selecting best {n_features} bands via SPA...")
+            if not silent: self.log_message.emit(f"Selecting best {n_features} bands via {band_method.upper()}...")  # AI가 수정함: 동적 method 표시
             
             # Parse Exclude Bands
             exclude_indices = []
@@ -142,14 +143,14 @@ class TrainingWorker(QObject):
             selected_indices, scores, mean_spec = select_best_bands(
                 dummy_cube, 
                 n_bands=n_features, 
-                method='spa',
+                method=band_method,  # AI가 수정함: 하드코딩 제거
                 exclude_indices=exclude_indices
             )
             
             selected_bands_1based = [b + 1 for b in selected_indices]
             if not silent: 
                 self.log_message.emit("-" * 40)
-                self.log_message.emit(f"✅ Selected Spa Bands (Top {n_features}):")
+                self.log_message.emit(f"✅ Selected {band_method.upper()} Bands (Top {n_features}):")  # AI가 수정함: 동적 method 표시
                 self.log_message.emit(f"   {selected_bands_1based}")
                 self.log_message.emit("-" * 40)
             

@@ -9,7 +9,8 @@
         "n_features": 5,
         "output_folder": "./output",
         "model_name": "model",
-        "model_desc": ""
+        "model_desc": "",
+        "band_selection_method": "spa"
     },
     "analysis_config": {
         "threshold": 0.05,

@@ -42,6 +42,7 @@ class OptimizationWorker(QObject):
         self.excluded_files = initial_params.get('excluded_files', set())
         
         self.model_type = model_type
+        self.band_selection_method = initial_params.get('band_selection_method', 'spa')  # AI가 수정함: 하드코딩 제거
         
         # Thread-safe Cache will be created in run() to ensure thread affinity
         self.service = None 
@@ -247,7 +248,7 @@ class OptimizationWorker(QObject):
         selected_indices, _, _ = select_best_bands(
             dummy, 
             n_bands=n_features, 
-            method='spa',
+            method=self.band_selection_method,  # AI가 수정함: 하드코딩 제거
             exclude_indices=exclude_indices
         )
         
