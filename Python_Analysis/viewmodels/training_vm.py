@@ -118,6 +118,9 @@ class TrainingViewModel(QObject):
             self.val_ratio = 0.20
             self.n_features = 5
         self.band_selection_method = config.get("band_selection_method", "spa")  # AI가 수정함: backward compat
+        # AI가 수정함: Variance→Full Band 마이그레이션 (기존 프로젝트 파일 호환)
+        if self.band_selection_method == "variance":  # AI가 수정함:
+            self.band_selection_method = "full"  # AI가 수정함:
             
         # AI가 추가함: 제외 목록 복원
         if "excluded_files" in config:

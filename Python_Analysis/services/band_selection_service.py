@@ -11,7 +11,7 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
     Args:
         data_cube: (H, W, Bands) or (N, Bands) HSI Data
         n_bands: Number of bands to select
-        method: 'spa' (Successive Projections Algorithm) or 'variance'
+        method: 'spa' (Successive Projections Algorithm) or 'full' (use all valid bands)  # AI가 수정함:
         exclude_indices: List of band indices to ignore (e.g. water absorption)
         
     Returns:
@@ -28,8 +28,8 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         X = data_cube
         
     n_features = X.shape[1]
-    if method not in ('spa', 'variance'):  # AI가 수정함: unknown method 검증
-        raise ValueError(f"Unknown band selection method: {method!r}. Must be 'spa' or 'variance'.")
+    if method not in ('spa', 'full'):  # AI가 수정함: variance → full, unknown method 검증
+        raise ValueError(f"Unknown band selection method: {method!r}. Must be 'spa' or 'full'.")  # AI가 수정함:
     
     # Handle Exclusion
     valid_indices = np.arange(n_features)
@@ -49,11 +49,10 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
     # AI가 수정함: importance_scores를 SPA 루프에서 계산하도록 변경
     importance_scores = np.zeros(X.shape[1])
     
-    if method == 'variance':
-        # Simple Variance
-        importance_scores = np.var(X, axis=0)
-        top_k = np.argsort(importance_scores)[::-1][:n_bands]
-        selected_internal_indices = top_k.tolist()
+    if method == 'full':  # AI가 수정함: Variance → Full Band (모든 유효 밴드 사용)
+        # Full Band: 모든 valid indices를 그대로 사용 (밴드 선택 알고리즘 없음)  # AI가 수정함:
+        importance_scores = np.var(X, axis=0)  # AI가 수정함: importance 시각화용 (band_importance.png)
+        selected_internal_indices = list(range(X.shape[1]))  # AI가 수정함:
         
     else: # Default: SPA-like (using Projections or PCA Loadings)
         # Standard SPA Implementation
@@ -142,4 +141,7 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
     else:
         global_mean = np.mean(data_cube, axis=0)
         
+    # AI가 수정함: Full Band 모드에서는 n_bands 슬라이싱 우회 (전체 유효 밴드 반환)
+    if method == 'full':  # AI가 수정함:
+        return final_indices, global_importance, global_mean  # AI가 수정함:
     return final_indices[:n_bands], global_importance, global_mean

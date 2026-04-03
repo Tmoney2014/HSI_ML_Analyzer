@@ -90,8 +90,8 @@ class TabTraining(QWidget):
         hbox_band_method = QHBoxLayout()
         hbox_band_method.addWidget(QLabel("Band Selection:"))
         self.combo_band_method = QComboBox()
-        self.combo_band_method.addItems(["SPA", "Variance"])
-        self.combo_band_method.setToolTip("SPA: Successive Projections (orthogonal), Variance: High-variance band selection")
+        self.combo_band_method.addItems(["SPA", "Full Band"])  # AI가 수정함: Variance → Full Band
+        self.combo_band_method.setToolTip("SPA: Successive Projections (orthogonal), Full Band: Use all valid bands (no selection)")  # AI가 수정함: 툴팁 업데이트
         hbox_band_method.addWidget(self.combo_band_method)
         vbox.addLayout(hbox_band_method)
         
@@ -172,6 +172,11 @@ class TabTraining(QWidget):
         self.combo_model.setEnabled(enabled)
         self.spin_ratio.setEnabled(enabled)
         self.combo_band_method.setEnabled(enabled)  # AI가 수정함: 훈련 중 비활성화
+        # AI가 수정함: Full Band 모드에서는 훈련 완료 후에도 spin_bands 비활성화 유지
+        if enabled:  # AI가 수정함:
+            self.spin_bands.setEnabled(self.vm.band_selection_method != "full")
+        else:  # AI가 수정함:
+            self.spin_bands.setEnabled(False)  # AI가 수정함:
 
     def on_start_click(self):
         # AI가 수정함: 별도 저장 불필요 (Auto-Save 됨)
@@ -207,12 +212,15 @@ class TabTraining(QWidget):
             self.spin_ratio.setValue(self.vm.val_ratio)
             self.spin_bands.setValue(self.vm.n_features)
             # AI가 수정함: Band Selection Method 복원
-            _method_display = {"spa": "SPA", "variance": "Variance"}
+            _method_display = {"spa": "SPA", "full": "Full Band"}  # AI가 수정함: variance → full
             idx = self.combo_band_method.findText(_method_display.get(self.vm.band_selection_method, "SPA"))
             if idx >= 0: self.combo_band_method.setCurrentIndex(idx)
         finally:
             self.blockSignals(False)
-            
+        
+        # AI가 수정함: Full Band 모드에서 Number of Bands 스핀박스 비활성화
+        self.spin_bands.setEnabled(self.vm.band_selection_method != "full")
+
         # Refresh Tree (Data Sync)
         self.refresh_file_tree()
 
@@ -277,8 +285,10 @@ class TabTraining(QWidget):
         self.vm.val_ratio = self.spin_ratio.value()
         self.vm.n_features = self.spin_bands.value()
         # AI가 수정함: Band Selection Method VM 동기화
-        _method_map = {"SPA": "spa", "Variance": "variance"}
+        _method_map = {"SPA": "spa", "Full Band": "full"}  # AI가 수정함: Variance → Full Band
         self.vm.band_selection_method = _method_map.get(self.combo_band_method.currentText(), "spa")
+        # AI가 수정함: Full Band 모드에서 Number of Bands 스핀박스 비활성화
+        self.spin_bands.setEnabled(self.vm.band_selection_method != "full")
         
         self.vm.config_changed.emit() # Notify Main Window to Save
 
