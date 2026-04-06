@@ -109,6 +109,12 @@ def apply_savgol(data, window_size=5, poly_order=2, deriv=0):
             f"Strict Mode Error: Not enough bands for SG filter. "
             f"Has {data.shape[1]}, Need >= {window_size}."
         )
+    # AI가 수정함: deriv > poly_order 사전 검증 추가 — scipy 내부 에러 대신 명확한 Strict Mode 메시지 제공
+    if deriv > poly_order:
+        raise ValueError(
+            f"Strict Mode Error: deriv({deriv}) must be <= poly_order({poly_order}). "
+            "SG filter 요구사항: polyorder >= deriv."
+        )
     return savgol_filter(data, window_length=window_size, polyorder=poly_order, deriv=deriv, axis=1)
 
 def apply_min_subtraction(data):
