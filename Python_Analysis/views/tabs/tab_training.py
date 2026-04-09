@@ -306,9 +306,6 @@ class TabTraining(QWidget):
     def append_log(self, msg):
         self.log_text.append(msg)
 
-    def append_log(self, msg):
-        self.log_text.append(msg)
-
     def on_browse_click(self):
         """AI가 수정함: 폴더 선택 다이얼로그"""
         import os
