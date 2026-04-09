@@ -100,12 +100,13 @@ class OptimizationService(QObject):
         self.log_message.emit(f"🏆 Optimization Done. Best: {best_acc:.2f}%")
         
         # 3. Final Report
-        self._generate_report(best_params, best_acc, history)
+        self._generate_report(best_params, best_acc, history)  # AI가 수정함: output_dir=None 기본 동작 유지
         
         return best_params, history
 
-    def _generate_report(self, best_params, current_acc, history):
-        """Generate final optimization report."""
+    def _generate_report(self, best_params, current_acc, history, output_dir=None):  # AI가 수정함: output_dir 인자 추가
+        """Generate final optimization report."""  # AI가 수정함: 파일 저장 옵션 지원
+        import csv, json, os  # AI가 수정함: CSV/JSON 저장용 모듈
         report = ["\n🎉 Optimization Completed!", "-" * 40, "[Final Configuration]"]
         
         target_keys = ["SimpleDeriv"]
@@ -145,4 +146,30 @@ class OptimizationService(QObject):
             report.append(f"{medal} #{i+1}: {acc:.2f}% | {', '.join(info)}")
 
         self.log_message.emit("\n".join(report))
+
+        if output_dir is not None:  # AI가 수정함: output_dir이 있을 때만 파일 저장
+            os.makedirs(output_dir, exist_ok=True)  # AI가 수정함: 저장 폴더 보장
+            csv_path = os.path.join(output_dir, "optimization_history.csv")  # AI가 수정함: CSV 경로
+            json_path = os.path.join(output_dir, "optimization_best.json")  # AI가 수정함: JSON 경로
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:  # AI가 수정함: CSV 기록 시작
+                writer = csv.DictWriter(f, fieldnames=["trial_no", "band_method", "n_bands", "gap", "train_acc", "test_acc", "f1_macro", "precision_macro", "recall_macro", "gap_pct", "train_time_ms", "status"])  # AI가 수정함: 12-col schema
+                writer.writeheader()  # AI가 수정함: CSV header 출력
+                for idx, (params, acc) in enumerate(history, start=1):  # AI가 수정함: trial row 생성
+                    band_method = params.get("band_selection_method", "")  # AI가 수정함: band method 추출
+                    writer.writerow({  # AI가 수정함: 12개 컬럼 고정 출력
+                        "trial_no": idx,  # AI가 수정함: trial 번호
+                        "band_method": band_method,  # AI가 수정함: band method
+                        "n_bands": "full" if band_method == "full" else params.get("n_features", ""),  # AI가 수정함: full band 처리
+                        "gap": params.get("gap", 0),  # AI가 수정함: gap 기록
+                        "train_acc": "",  # AI가 수정함: future extension placeholder
+                        "test_acc": acc,  # AI가 수정함: 평가 정확도
+                        "f1_macro": "",  # AI가 수정함: future extension placeholder
+                        "precision_macro": "",  # AI가 수정함: future extension placeholder
+                        "recall_macro": "",  # AI가 수정함: future extension placeholder
+                        "gap_pct": "",  # AI가 수정함: future extension placeholder
+                        "train_time_ms": "",  # AI가 수정함: future extension placeholder
+                        "status": "ok",  # AI가 수정함: 상태 고정
+                    })  # AI가 수정함: row 종료
+            with open(json_path, "w", encoding="utf-8") as f:  # AI가 수정함: JSON 기록 시작
+                f.write(json.dumps(best_params, ensure_ascii=False, indent=2))  # AI가 수정함: best params 저장
 

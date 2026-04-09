@@ -19,7 +19,7 @@ class OptimizationWorker(QObject):
     data_ready = pyqtSignal(object, object)  # AI가 수정함: 캐시 저장용 (X, y)
     base_data_ready = pyqtSignal(object, object)  # AI가 수정함: 통합 캐시용 Base Data
     
-    def __init__(self, file_groups, vm_state, main_vm_cache, initial_params, model_type="Linear SVM", base_data_cache=None):
+    def __init__(self, file_groups, vm_state, main_vm_cache, initial_params, model_type="Linear SVM", base_data_cache=None, output_dir=None):  # AI가 수정함: output_dir 인자 추가
         super().__init__()
         self.file_groups = file_groups
         # VM State Snapshot (Read-Only)
@@ -37,6 +37,7 @@ class OptimizationWorker(QObject):
         self.data_cache = main_vm_cache 
         self.initial_params = initial_params
         self.base_data_cache = base_data_cache # Handoff Data
+        self.output_dir = output_dir  # AI가 수정함: 저장 경로
         
         # AI가 추가함: 제외 파일 목록
         self.excluded_files = initial_params.get('excluded_files', set())
@@ -48,6 +49,8 @@ class OptimizationWorker(QObject):
         self.service = None 
         
         self.is_running = True
+        self._total_trials = 0  # AI가 수정함: 진행률 추적용 총 trial 수
+        self._completed_trials = 0  # AI가 수정함: 완료된 trial 수
         
         # Cache for Pre-loaded Validation Data (Raw/Reflectance before Prep)
         self.cached_X = None
@@ -64,7 +67,17 @@ class OptimizationWorker(QObject):
                 self.optimization_finished.emit(False)
                 return
 
+            assert self.cached_X is not None and self.cached_y is not None  # AI가 수정함: 캐시 준비 후 None 방지
             self.log_message.emit(f"Data Ready: {self.cached_X.shape[0]} pixels cached in memory.")
+            # AI가 수정함: 총 trial 수 사전 계산 (progress bar용)
+            _band_range = [self.initial_params.get('n_features', 5)]  # AI가 수정함: Full Band 기본 trial 수 1개
+            if self.initial_params.get('band_selection_method') != 'full':  # AI가 수정함: 일반 모드 trial 범위 사용
+                _band_range = list(range(5, 41, 5))  # AI가 수정함: 밴드 수 탐색 범위
+            _gap_range = [0]  # AI가 수정함: SimpleDeriv 없을 때 gap trial 없음
+            if any(s.get('name') == 'SimpleDeriv' for s in self.initial_params.get('prep', [])):  # AI가 수정함: SimpleDeriv 포함 여부 확인
+                _gap_range = list(range(1, 41))  # AI가 수정함: gap 탐색 범위
+            self._total_trials = len(_band_range) * len(_gap_range)  # AI가 수정함: progress bar 분모 계산
+            self._completed_trials = 0  # AI가 수정함: 진행률 카운터 초기화
             
             # 2. Instantiate Service in THIS thread
             self.service = OptimizationService()
@@ -72,8 +85,10 @@ class OptimizationWorker(QObject):
             
             # Run the generic optimization algorithm
             best_params, history = self.service.run_optimization(self.initial_params, self.trial_callback)
-            
+
             actual_best_acc = max((acc for _, acc in history), default=0.0)  # AI가 수정함: 마지막 trial이 아닌 실제 최고 정확도 계산
+            if self.output_dir:  # AI가 수정함: output_dir이 있을 때만 report 저장
+                self.service._generate_report(best_params, actual_best_acc, history, output_dir=self.output_dir)  # AI가 수정함: CSV/JSON 저장
             self.log_message.emit(f"=== Optimization Finished. Best Accuracy: {actual_best_acc:.2f}% ===")  # AI가 수정함: max() 기반 best accuracy 사용
             
             self.best_params = best_params
@@ -81,6 +96,7 @@ class OptimizationWorker(QObject):
             # AI가 수정함: 통합 캐시 Update는 Load Loop 내부에서 개별적으로 수행됨
             # self.cached_X / cached_y는 내부 최적화용으로만 유지
             
+            self.progress_update.emit(100)  # AI가 수정함: 완료 시 100% emit
             self.optimization_finished.emit(True)
             
         except Exception as e:
@@ -98,6 +114,10 @@ class OptimizationWorker(QObject):
         
         # 2. Run Pipeline on Cached Data (Fast)
         score = self._evaluate_cached_data(trial_prep, n_features)
+        self._completed_trials += 1  # AI가 수정함: 진행률 추적
+        if self._total_trials > 0:  # AI가 수정함: 0 나누기 방어
+            pct = int(self._completed_trials * 100 / self._total_trials)  # AI가 수정함: 진행률 계산
+            self.progress_update.emit(min(pct, 99))  # AI가 수정함: 100%는 완료 시에만
         return score
 
     def _prepare_base_data(self):
@@ -203,6 +223,7 @@ class OptimizationWorker(QObject):
         """
         Apply Preprocessing to Cached Data -> Band Selection -> Train -> Score
         """
+        assert self.cached_X is not None and self.cached_y is not None  # AI가 수정함: 평가 전 캐시 None 방지
         X = self.cached_X.copy() # (N, Bands)
         y = self.cached_y
         

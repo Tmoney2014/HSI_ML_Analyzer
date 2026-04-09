@@ -19,6 +19,11 @@ except ImportError:  # AI가 수정함: seaborn 없을 때 fallback 처리
     sns = None  # AI가 수정함: seaborn 비활성화 플래그
 from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
+_HSI_CAMERA_BANDWIDTH_BPS = 940 * 1_000_000 / 8  # AI가 수정함: GigE Vision 940Mbps → bytes/sec
+_HSI_PIXEL_BYTES = 2  # AI가 수정함: uint16 per pixel
+_HSI_FRAME_WIDTH = 640  # AI가 수정함: pixels per spatial line
+# TODO: move to config in v2  # AI가 수정함: 고정 FPS 추정값은 후속 버전에서 설정화
+
 class LearningService:
     def train_model(self, X, y, model_type="Linear SVM", test_ratio=0.2, log_callback=None):
         """
@@ -172,14 +177,21 @@ class LearningService:
         except ValueError:
             log("⚠️ [LogReg] Stratified split 불가 (클래스 샘플 부족). 일반 split으로 진행합니다.")  # AI가 수정함: 경고 로그 추가
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)  # AI가 수정함: fallback split 적용
-        model = LogisticRegression(  # AI가 수정함: LogisticRegression 모델 생성
-            max_iter=cfg_get('model', 'logistic_max_iter', 1000),  # AI가 수정함: 반복 횟수 설정값 사용
-            class_weight='balanced',  # AI가 수정함: 불균형 클래스 대응
-            solver='lbfgs',  # AI가 수정함: multinomial 호환 solver 지정
-            multi_class='multinomial'  # AI가 수정함: C# runtime weight shape 일관성 확보
-        )  # AI가 수정함: LogisticRegression 생성 종료
+        import sklearn  # AI가 수정함: 버전 분기용
+        from packaging.version import Version as _V  # AI가 수정함: 버전 비교용
+        _kwargs = {  # AI가 수정함: LogisticRegression 생성 kwargs 구성
+            'max_iter': cfg_get('model', 'logistic_max_iter', 1000),  # AI가 수정함: 반복 횟수 설정값 사용
+            'class_weight': 'balanced',  # AI가 수정함: 불균형 클래스 대응
+            'solver': 'lbfgs',  # AI가 수정함: multinomial 호환 solver 지정
+        }  # AI가 수정함: kwargs 초기화 종료
+        if _V(sklearn.__version__) < _V('1.6.0'):  # AI가 수정함: sklearn < 1.6 에서만 multi_class 명시
+            _kwargs['multi_class'] = 'multinomial'  # AI가 수정함: multinomial 고정
+        model = LogisticRegression(**_kwargs)  # AI가 수정함: 버전 분기 적용
         try:
             model.fit(X_train, y_train)  # AI가 수정함: Logistic Regression 학습 수행
+            assert (  # AI가 수정함: multinomial weight shape 검증
+                model.coef_.shape[0] == len(np.unique(y))  # AI가 수정함: multinomial weight shape 검증
+            ), f"LogReg coef shape mismatch: {model.coef_.shape[0]} != {len(np.unique(y))}"  # AI가 수정함: multinomial weight shape 검증
 
             y_train_pred = model.predict(X_train)  # AI가 수정함: train 예측값 계산
             y_test_pred = model.predict(X_test)  # AI가 수정함: test 예측값 계산
@@ -487,6 +499,9 @@ class LearningService:
                     required_raw_bands.add(base + offset)
         
         required_raw_bands_sorted = sorted(list(required_raw_bands))
+        estimated_fps = _HSI_CAMERA_BANDWIDTH_BPS / (  # AI가 수정함: FPS 추정 계산
+            max(len(required_raw_bands_sorted), 1) * _HSI_PIXEL_BYTES * _HSI_FRAME_WIDTH  # AI가 수정함: FPS 추정 계산
+        )  # AI가 수정함: FPS 추정 계산
         # AI가 추가함: total_bands 클램프 — SG radius/gap offset이 원본 밴드 범위 초과 방지
         # AI가 수정함: V2-RRB — total_bands None 시 경고 (mean_spectrum 유추는 위에서 이미 처리됨)
         if total_bands is not None and total_bands > 0:
@@ -522,6 +537,7 @@ class LearningService:
             "Timestamp": timestamp, # AI가 추가함
             "SelectedBands": [int(b) for b in selected_bands],
             "RequiredRawBands": required_raw_bands_sorted,  # AI가 추가함: 런타임용 원본 밴드 목록
+            "EstimatedFPS": round(estimated_fps, 2),  # AI가 수정함: FPS 추정값
             "PrepChainOrder": prep_chain_order,             # AI가 추가함: 전처리 적용 순서 (C# 패리티용)
             "ExcludeBands": exclude_rules if exclude_rules else "",
             "Weights": weights,

@@ -394,7 +394,8 @@ class TrainingViewModel(QObject):
             self.main_vm.data_cache, 
             initial_params,
             model_type=model_type,  # AI가 수정함: 모델 타입 전달
-            base_data_cache=dict(self.cached_base_data)  # AI가 수정함: race condition 방지 — snapshot copy 전달
+            base_data_cache=dict(self.cached_base_data),  # AI가 수정함: race condition 방지 — snapshot copy 전달
+            output_dir=self.output_folder  # AI가 수정함: output_dir 전달
         )
         self.opt_worker.moveToThread(self.opt_thread)
         
