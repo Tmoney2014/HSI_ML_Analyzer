@@ -15,6 +15,7 @@ from services.optimization_service import OptimizationService
 from services.processing_service import ProcessingService
 from services.training_worker import TrainingWorker
 from services.optimization_worker import OptimizationWorker
+from services.experiment_worker import ExperimentWorker  # AI가 수정함: Experiment Grid 워커 임포트
 from models import processing
 
 class TrainingViewModel(QObject):
@@ -50,6 +51,9 @@ class TrainingViewModel(QObject):
         
         self.opt_thread = None
         self.opt_worker = None
+        
+        self.exp_thread = None   # AI가 수정함: Experiment Grid 스레드
+        self.exp_worker = None   # AI가 수정함: Experiment Grid 워커
         
         # AI가 수정함: 캐시 구조 통합 - Base Data만 캐시 (전처리 전)
         # Dictionary Cache: {file_path: (X_base, y)} for selective training
@@ -344,6 +348,9 @@ class TrainingViewModel(QObject):
         if self.opt_worker:
             self.opt_worker.stop()
             self.log_message.emit("Stopping optimization...")
+        if self.exp_worker:  # AI가 수정함: experiment worker 중단
+            self.exp_worker.stop()
+            self.log_message.emit("Stopping experiment...")
 
     def run_optimization(self, output_path: Optional[str] = None, model_type: Optional[str] = None, test_ratio: float = 0.0, n_features: int = 0):
         """
@@ -473,3 +480,65 @@ class TrainingViewModel(QObject):
     def _on_opt_thread_stopped(self):
         self.opt_worker = None
         self.opt_thread = None
+
+    def run_experiment_grid(self, band_methods: list, model_types: list):  # AI가 수정함: 실험 그리드 실행
+        """Async Experiment Grid Entry Point."""
+        if not self._safe_cleanup_exp_thread(): return
+        self._ensure_ref_loaded()
+        vm_state = self._create_vm_state_snapshot()
+        params = {
+            'band_methods': band_methods,
+            'model_types': model_types,
+            'n_bands': self.n_features,
+            'test_ratio': self.val_ratio,
+            'output_dir': self.output_folder,
+            'excluded_files': self.excluded_files.copy(),
+            'band_selection_method': self.band_selection_method,
+        }
+        self.exp_thread = QThread()
+        groups_copy = {k: list(v) for k, v in self.main_vm.file_groups.items()}
+        self.exp_worker = ExperimentWorker(
+            groups_copy, vm_state, self.main_vm.data_cache, params,
+            base_data_cache=dict(self.cached_base_data)
+        )
+        self.exp_worker.moveToThread(self.exp_thread)
+        self.exp_thread.started.connect(self.exp_worker.run)
+        self.exp_worker.log_message.connect(self.log_message)
+        self.exp_worker.progress_update.connect(self.progress_update)
+        self.exp_worker.experiment_finished.connect(self._on_experiment_cleanup)
+        self.exp_worker.base_data_ready.connect(self.on_base_data_ready)
+        self.main_vm.request_save()
+        self.exp_thread.start()
+
+    def _safe_cleanup_exp_thread(self):  # AI가 수정함: Experiment thread 안전 정리
+        if self.exp_thread is None: return True
+        if self.exp_thread.isRunning():
+            self.log_message.emit("Experiment already running...")
+            return False
+        try:
+            self.exp_thread.started.disconnect()
+            self.exp_thread.finished.disconnect()
+        except (TypeError, RuntimeError): pass
+        if self.exp_worker:
+            try:
+                self.exp_worker.log_message.disconnect()
+                self.exp_worker.experiment_finished.disconnect()
+                self.exp_worker.base_data_ready.disconnect()
+            except (TypeError, RuntimeError): pass
+        self.exp_thread = None
+        self.exp_worker = None
+        return True
+
+    def _on_experiment_cleanup(self, success):  # AI가 수정함: experiment thread cleanup
+        self.training_finished.emit(success)
+        if self.exp_thread:
+            if self.exp_worker:
+                self.exp_thread.finished.connect(self.exp_worker.deleteLater)
+            self.exp_thread.finished.connect(self.exp_thread.deleteLater)
+            self.exp_thread.quit()
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(100, self._on_exp_thread_stopped)
+
+    def _on_exp_thread_stopped(self):  # AI가 수정함: experiment thread reference cleanup
+        self.exp_worker = None
+        self.exp_thread = None

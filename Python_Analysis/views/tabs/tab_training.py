@@ -134,6 +134,12 @@ class TabTraining(QWidget):
         splitter.setSizes([300, 700]) # Ratio
         layout.addWidget(splitter, 1) # Stretch = 1 (Expand to fill bottom)
         
+        self.progress_bar = QProgressBar()  # AI가 수정함: Progress Bar 복원
+        self.progress_bar.setRange(0, 100)   # AI가 수정함:
+        self.progress_bar.setValue(0)         # AI가 수정함:
+        self.progress_bar.setTextVisible(True)  # AI가 수정함:
+        layout.addWidget(self.progress_bar)  # AI가 수정함: splitter 아래, 버튼 위
+        
         # Buttons Layout (Bottom)
         hbox_btns = QHBoxLayout()
         
@@ -149,13 +155,26 @@ class TabTraining(QWidget):
         hbox_btns.addWidget(self.btn_optimize)
         
         layout.addLayout(hbox_btns)
+
+        hbox_btns2 = QHBoxLayout()  # AI가 수정함: 두 번째 버튼 행
+        self.btn_export = QPushButton("Export Matrix")  # AI가 수정함: Export 버튼
+        self.btn_export.setToolTip("Run experiment grid (band_methods × models) and export CSV + confusion matrix")
+        self.btn_export.setStyleSheet("background-color: #FF9800; color: white; font-size: 13px; font-weight: bold; height: 36px;")
+        self.btn_export.clicked.connect(self.on_export_click)
+        hbox_btns2.addWidget(self.btn_export)
+
+        self.btn_open_folder = QPushButton("Open Experiments Folder")  # AI가 수정함: 폴더 열기 버튼
+        self.btn_open_folder.setStyleSheet("background-color: #607D8B; color: white; font-size: 13px; height: 36px;")
+        self.btn_open_folder.clicked.connect(self.on_open_folder_click)
+        hbox_btns2.addWidget(self.btn_open_folder)
+        layout.addLayout(hbox_btns2)
         
         # AI가 추가함: UI 이벤트 연결
         self.connect_ui_events()
 
     def connect_signals(self):
         self.vm.log_message.connect(self.append_log)
-        # self.vm.progress_update.connect(self.progress.setValue) # ProgressBar Removed
+        self.vm.progress_update.connect(self.progress_bar.setValue)  # AI가 수정함: Progress Bar 연결
         self.vm.training_finished.connect(self.on_finished)
 
     def on_optimize_click(self):
@@ -169,6 +188,8 @@ class TabTraining(QWidget):
     def set_buttons_enabled(self, enabled):
         self.btn_train.setEnabled(enabled)
         self.btn_optimize.setEnabled(enabled)
+        self.btn_export.setEnabled(enabled)      # AI가 수정함: Export 버튼
+        self.btn_open_folder.setEnabled(enabled) # AI가 수정함: Open Folder 버튼
         self.combo_model.setEnabled(enabled)
         self.spin_ratio.setEnabled(enabled)
         self.combo_band_method.setEnabled(enabled)  # AI가 수정함: 훈련 중 비활성화
@@ -187,6 +208,7 @@ class TabTraining(QWidget):
         self.vm.run_training()
 
     def on_finished(self, success):
+        self.progress_bar.setValue(0)  # AI가 수정함: 완료 후 progress bar 초기화
         self.set_buttons_enabled(True)
         if success:
             # AI가 수정함: 최적화 결과의 n_features를 UI에 반영
@@ -327,3 +349,22 @@ class TabTraining(QWidget):
             # AI가 추가함: 경로 변경 즉시 저장 (Force Sync)
             self.vm.output_folder = full_path
             self.vm.config_changed.emit()
+
+    def on_export_click(self):  # AI가 수정함: Export Matrix 버튼 핸들러
+        """현재 UI 체크박스 기준으로 모든 활성 band_method × model 조합 실험 그리드 실행"""
+        # 1. 현재 VM에서 선택된 band_methods, model_types 수집
+        band_methods = [self.vm.band_selection_method]  # 현재 선택된 1개
+        model_types = [self.vm.model_type]              # 현재 선택된 1개
+        # TODO: 향후 다중 선택 체크박스 UI로 확장 가능
+        self.log_text.clear()
+        self.set_buttons_enabled(False)
+        self.vm.run_experiment_grid(band_methods, model_types)
+
+    def on_open_folder_click(self):  # AI가 수정함: 실험 폴더 열기
+        import os, subprocess
+        folder = self.vm.output_folder
+        if os.path.exists(folder):
+            subprocess.Popen(f'explorer "{folder}"')  # AI가 수정함: Windows 탐색기 열기
+        else:
+            self.append_log(f"⚠️ Folder not found: {folder}")
+
