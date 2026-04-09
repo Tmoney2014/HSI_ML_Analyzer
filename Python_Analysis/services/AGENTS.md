@@ -31,24 +31,28 @@ Supported chain step names: `"SG"`, `"SimpleDeriv"`, `"SNV"`, `"L2"`, `"MinSub"`
 select_best_bands(
     data_cube: ndarray,   # (H,W,B) or (N,B)
     n_bands: int = 5,
-    method: str = 'spa',  # 'spa' | 'full' <!-- AI가 수정함: 'variance'→'full' (실제 코드 기준) -->
+    method: str = 'spa',  # 'spa' | 'full' | 'anova_f' | 'spa_lda_fast' | 'spa_lda_greedy' | 'lda_coef' <!-- AI가 수정함: supervised 방법 4개 추가 -->
     exclude_indices: list = None,
-    keep_order: bool = False
+    keep_order: bool = False,
+    labels: ndarray = None  # AI가 수정함: supervised 방법용 클래스 레이블 (anova_f/spa_lda_fast/spa_lda_greedy/lda_coef 필수)
 ) -> (selected_indices: list[int], importance: ndarray, mean_spectrum: ndarray)
 ```
-SPA orthogonal projection band selection. Subsamples to `cfg_get('spa','max_samples',10000)`. Returns 0-based indices. Callers may pass `X.reshape(-1, 1, B)` — function handles both 2D and 3D input.
+Band selection service supporting both unsupervised (SPA, Full Band) and supervised methods (ANOVA-F, SPA-LDA Fast, SPA-LDA Greedy, LDA-coef). All methods subsample to `cfg_get('spa','max_samples',10000)`. Returns 0-based indices. Callers may pass `X.reshape(-1, 1, B)` — function handles both 2D and 3D input. <!-- AI가 수정함: supervised 방법 추가 반영 -->
 
-`importance` return value = **orthogonal contribution norm at selection time** (actual SPA projection magnitude when each band was chosen). Used for `band_importance.png` visualization. Float guard: `v_norm_sq < 1e-12` prevents explosion on linearly dependent bands.
+**Supervised methods require `labels` parameter** — raises `ValueError` if `labels=None`.
+- `anova_f`: sklearn `f_classif` F-통계량 기반 ranking. NaN/Inf → 0 처리. 클래스 수 < 2 시 `ValueError`.
+- `spa_lda_fast`: SPA로 `max(n_bands*3, n_bands+2)` 후보 추출 → LDA coef ranking. 빠름.
+- `spa_lda_greedy`: Greedy cross-validation (cv=min(3,min_class_count)). 느림 — UserWarning 발생. 최적화 루프 비권장.
+- `lda_coef`: LDA(`solver='lsqr', shrinkage='auto'`) fit → `coef_` 절댓값 합 ranking. HSI처럼 n_samples < n_bands 환경에서 필수 solver 설정.
 
-### `learning_service.py` — `LearningService`
+`importance` return value: SPA는 직교 기여도 노름, supervised 방법은 각 method의 score 배열. Used for `band_importance.png` visualization. <!-- AI가 수정함: supervised importance 의미 추가 -->
+
+### `learning_service.py` — `LearningService` <!-- AI가 수정함: 지원 모델 목록 갱신 -->
 ```python
 train_model(X, y, model_type="Linear SVM", test_ratio=0.2, log_callback=None)
     → (model, metrics: dict)
+    # model_type: "Linear SVM" | "LDA" | "PLS-DA" | "Ridge Classifier" | "Logistic Regression"  # AI가 수정함
     # metrics keys: TrainAccuracy, TestAccuracy (0-100), F1Score, TotalSamples, TestSplit
-
-export_model(model, selected_bands, output_path, preprocessing_config=None,
-             processing_mode="Raw", ...) → None
-    # Writes model.json + band_importance.png at output_path
 ```
 
 **`export_model` key behaviors:**

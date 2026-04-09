@@ -220,13 +220,14 @@ sensor_clock = node_map.DeviceClockFrequency.value
 
 **비교할 밴드 선택 방법:**
 
-| 방법 | y 사용 | 설명 |
-|------|--------|------|
-| SPA | ❌ | 현재 구현, 직교성 기반 |
-| ANOVA-F | ✅ | 클래스 분리력 직접 최적화 |
-| SPA-LDA | ✅ | SPA 후보 → LDA 평가 |
-| LDA-coef | ✅ | LDA 계수 크기 기준 |
-| Full Band (baseline) | — | N_max개 전체 사용 |
+| 방법 | y 사용 | 설명 | 구현 상태 |
+|------|--------|------|-----------|
+| SPA | ❌ | 현재 구현, 직교성 기반 | ✅ 완료 |
+| ANOVA-F | ✅ | 클래스 분리력 직접 최적화 | ✅ 완료 |
+| SPA-LDA Fast | ✅ | SPA 후보 → LDA coef ranking (빠름) | ✅ 완료 |
+| SPA-LDA Greedy | ✅ | Greedy CV 선택 (정확, 느림) | ✅ 완료 |
+| LDA-coef | ✅ | LDA 계수 크기 기준 | ✅ 완료 |
+| Full Band (baseline) | — | N_max개 전체 사용 | ✅ 완료 |
 
 **실험 프로토콜:**
 ```
@@ -255,22 +256,23 @@ sensor_clock = node_map.DeviceClockFrequency.value
 
 | 모델 | 특징 | 런타임 적합성 | 현재 구현 |
 |------|------|--------------|-----------|
-| LDA | Fisher criterion, 행렬곱 1회 | ✅ 최적 | ✅ 있음 |
-| Linear SVM | 초평면 최대 마진 | ✅ 적합 | ✅ 있음 |
-| PLS-DA | 회귀 기반 판별 | ✅ 적합 | ✅ 있음 |
-| Ridge Classifier | L2 정규화 선형 | ✅ 적합 | ❌ 추가 필요 |
-| Logistic Regression | 확률 출력 선형 | ✅ 적합 | ❌ 추가 필요 |
+| LDA | Fisher criterion, 행렬곱 1회 | ✅ 최적 | ✅ 완료 |
+| Linear SVM | 초평면 최대 마진 | ✅ 적합 | ✅ 완료 |
+| PLS-DA | 회귀 기반 판별 | ✅ 적합 | ✅ 완료 |
+| Ridge Classifier | L2 정규화 선형 | ✅ 적합 | ✅ 완료 |
+| Logistic Regression | 확률 출력 선형 | ✅ 적합 | ✅ 완료 |
 | QDA | 비선형 경계 | ⚠️ 느림 | ❌ 비교용만 |
 
 **실험 매트릭스 (최종 결과 테이블):**
 ```
-밴드선택\모델    LDA    SVM    PLS-DA   Ridge   LogReg
-─────────────   ─────  ─────  ──────   ─────   ──────
-SPA              ???    ???    ???      ???     ???
-ANOVA-F          ???    ???    ???      ???     ???
-SPA-LDA          ???    ???    ???      ???     ???
-LDA-coef         ???    ???    ???      ???     ???
-Full Band        ???    ???    ???      ???     ???
+밴드선택\모델      LDA    SVM    PLS-DA   Ridge   LogReg
+───────────────   ─────  ─────  ──────   ─────   ──────
+SPA                ???    ???    ???      ???     ???
+ANOVA-F            ???    ???    ???      ???     ???
+SPA-LDA Fast       ???    ???    ???      ???     ???
+SPA-LDA Greedy     ???    ???    ???      ???     ???
+LDA-coef           ???    ???    ???      ???     ???
+Full Band          ???    ???    ???      ???     ???
 ```
 
 ---
@@ -396,9 +398,15 @@ References
 |------|------|
 | SPA 밴드 선택 | ✅ 완료 |
 | Full Band 모드 | ✅ 완료 |
+| ANOVA-F 밴드 선택 | ✅ 완료 |
+| SPA-LDA Fast 밴드 선택 | ✅ 완료 |
+| SPA-LDA Greedy 밴드 선택 | ✅ 완료 |
+| LDA-coef 밴드 선택 | ✅ 완료 |
 | LDA 학습/export | ✅ 완료 |
 | Linear SVM 학습/export | ✅ 완료 |
 | PLS-DA 학습/export | ✅ 완료 |
+| Ridge Classifier 학습/export | ✅ 완료 |
+| Logistic Regression 학습/export | ✅ 완료 |
 | Log-Gap 전처리 (SimpleDeriv) | ✅ 완료 |
 | Savitzky-Golay 전처리 | ✅ 완료 |
 | model.json → C# 런타임 | ✅ 완료 |
@@ -407,11 +415,6 @@ References
 
 | 기능 | 우선순위 | 비고 |
 |------|----------|------|
-| ANOVA-F 밴드 선택 | 🔴 High | y 파라미터 추가 필요 |
-| SPA-LDA 밴드 선택 | 🔴 High | 조합 방식 |
-| LDA-coef 밴드 선택 | 🟠 Medium | LDA 계수 활용 |
-| Ridge Classifier | 🟠 Medium | sklearn 1줄 추가 |
-| Logistic Regression | 🟠 Medium | sklearn 1줄 추가 |
 | QDA (비교용) | 🟡 Low | 런타임 미사용, 실험용 |
 | 밴드선택 × 모델 자동 그리드 실험 | 🔴 High | 논문 Table 자동 생성 |
 | FPS 실측 로깅 도구 | 🔴 High | Phase 1 필수 |
