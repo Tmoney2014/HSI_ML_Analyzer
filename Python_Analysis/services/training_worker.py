@@ -144,7 +144,8 @@ class TrainingWorker(QObject):
                 dummy_cube, 
                 n_bands=n_features, 
                 method=band_method,  # AI가 수정함: 하드코딩 제거
-                exclude_indices=exclude_indices
+                exclude_indices=exclude_indices,
+                labels=y  # AI가 수정함: supervised 밴드 선택 방법을 위해 labels=y 전달
             )
             
             selected_bands_1based = [b + 1 for b in selected_indices]

@@ -1,6 +1,9 @@
 import numpy as np
+import warnings  # AI가 수정함: Task 2 - UserWarning 출력용
 from sklearn.decomposition import PCA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis  # AI가 수정함: Task 2 - LDA 기반 방법 추가
 from sklearn.feature_selection import f_classif  # AI가 수정함: ANOVA-F 방법 추가
+from sklearn.model_selection import cross_val_score  # AI가 수정함: Task 2 - SPA-LDA greedy용
 from scipy.signal import savgol_filter
 from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
@@ -72,8 +75,125 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         importance_scores = f_scores  # AI가 수정함: importance score를 F-통계량으로 사용
         selected_internal_indices = list(np.argsort(f_scores)[::-1][:n_bands])  # AI가 수정함: 상위 밴드 선택
         
-    elif method in _SUPERVISED_METHODS:  # AI가 수정함: Task 2 미구현 supervised method 차단
-        raise NotImplementedError(f"method='{method}' is not yet implemented. Use Task 2 to add it.")  # AI가 수정함: 미구현 방법 안내
+    elif method == 'lda_coef':  # AI가 수정함: LDA 계수 기반 밴드 중요도
+        assert labels is not None
+        # subsample (labels와 X 반드시 동일 인덱스)
+        max_samples = cfg_get('spa', 'max_samples', 10000)
+        if not isinstance(max_samples, int):
+            max_samples = 10000
+        if X.shape[0] > max_samples:
+            rng = np.random.RandomState(42)
+            sub_idx = rng.choice(X.shape[0], max_samples, replace=False)
+            X_lda = X[sub_idx]
+            labels_lda = labels[sub_idx]  # AI가 수정함: 동일 인덱스로 subsample
+        else:
+            X_lda = X
+            labels_lda = labels
+        lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto')  # AI가 수정함: solver='svd' 절대 금지
+        try:
+            lda.fit(X_lda, labels_lda)
+            coef_importance = np.sum(np.abs(lda.coef_), axis=0)
+        except Exception:
+            warnings.warn("lda_coef fit failed, falling back to variance", RuntimeWarning)
+            coef_importance = np.var(X_lda, axis=0)
+        importance_scores = coef_importance
+        selected_internal_indices = list(np.argsort(coef_importance)[::-1][:n_bands])
+
+    elif method == 'spa_lda_fast':  # AI가 수정함: SPA 후보 추출 → LDA scoring
+        assert labels is not None
+        # subsample
+        max_samples = cfg_get('spa', 'max_samples', 10000)
+        if not isinstance(max_samples, int):
+            max_samples = 10000
+        if X.shape[0] > max_samples:
+            rng = np.random.RandomState(42)
+            sub_idx = rng.choice(X.shape[0], max_samples, replace=False)
+            X_s = X[sub_idx]
+            labels_s = labels[sub_idx]  # AI가 수정함: 동일 인덱스로 subsample
+        else:
+            X_s = X
+            labels_s = labels
+        # Step 1: SPA로 n_candidates개 후보 추출
+        n_candidates = min(X_s.shape[1], max(n_bands * 3, n_bands + 2))  # AI가 수정함: 후보 풀 크기
+        P = X_s.copy()
+        spa_candidates = []
+        for k in range(n_candidates):
+            norms = np.linalg.norm(P, axis=0)
+            if spa_candidates:
+                norms[spa_candidates] = -1
+            max_idx = int(np.argmax(norms))
+            spa_candidates.append(max_idx)
+            if k == n_candidates - 1:
+                break
+            v = P[:, max_idx].reshape(-1, 1)
+            v_norm_sq = float(np.dot(v.T, v))
+            if v_norm_sq < 1e-12:
+                break
+            P = P - np.dot(v, np.dot(v.T, P) / v_norm_sq)
+        # Step 2: 후보 중 LDA coef 기반 scoring
+        X_cand = X_s[:, spa_candidates]
+        lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto')  # AI가 수정함: solver='svd' 금지
+        try:
+            lda.fit(X_cand, labels_s)
+            coef_cand = np.sum(np.abs(lda.coef_), axis=0)
+        except Exception:
+            coef_cand = np.var(X_cand, axis=0)
+        top_local = list(np.argsort(coef_cand)[::-1][:n_bands])
+        selected_internal_indices = [spa_candidates[i] for i in top_local]
+        importance_scores[selected_internal_indices] = coef_cand[top_local]
+
+    elif method == 'spa_lda_greedy':  # AI가 수정함: Greedy cross-validation 밴드 선택
+        assert labels is not None
+        warnings.warn(  # AI가 수정함: 느린 방법 경고
+            "spa_lda_greedy is slow; not recommended for optimization loops.",
+            UserWarning, stacklevel=3
+        )
+        # subsample
+        max_samples = cfg_get('spa', 'max_samples', 10000)
+        if not isinstance(max_samples, int):
+            max_samples = 10000
+        if X.shape[0] > max_samples:
+            rng = np.random.RandomState(42)
+            sub_idx = rng.choice(X.shape[0], max_samples, replace=False)
+            X_g = X[sub_idx]
+            labels_g = labels[sub_idx]  # AI가 수정함: 동일 인덱스로 subsample
+        else:
+            X_g = X
+            labels_g = labels
+        # cv = min(3, min_class_count) — 필수 제약
+        class_counts = np.bincount(labels_g.astype(int))
+        min_class_count = int(np.min(class_counts[class_counts > 0]))
+        cv = min(3, min_class_count)  # AI가 수정함: cv 제한 필수
+
+        remaining = list(range(X_g.shape[1]))
+        greedy_selected = []
+        greedy_scores = np.zeros(X_g.shape[1])
+
+        lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto')  # AI가 수정함: solver='svd' 금지
+        for _ in range(n_bands):
+            if not remaining:
+                break
+            best_band = None
+            best_score = -1.0
+            for b in remaining:
+                candidate_set = greedy_selected + [b]
+                X_trial = X_g[:, candidate_set]
+                try:
+                    scores = cross_val_score(lda, X_trial, labels_g, cv=cv, scoring='accuracy')
+                    score = float(np.mean(scores))
+                except Exception:
+                    score = 0.0
+                if score > best_score:
+                    best_score = score
+                    best_band = b
+            if best_band is None:
+                break
+            greedy_selected.append(best_band)
+            greedy_scores[best_band] = best_score
+            remaining.remove(best_band)
+
+        selected_internal_indices = greedy_selected
+        importance_scores = greedy_scores
         
     else: # Default: SPA-like (using Projections or PCA Loadings)
         # Standard SPA Implementation

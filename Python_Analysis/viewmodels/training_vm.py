@@ -121,6 +121,10 @@ class TrainingViewModel(QObject):
         # AI가 수정함: Variance→Full Band 마이그레이션 (기존 프로젝트 파일 호환)
         if self.band_selection_method == "variance":  # AI가 수정함:
             self.band_selection_method = "full"  # AI가 수정함:
+        # AI가 수정함: 알 수 없는 method string 방어 (프로젝트 파일 호환)
+        _known_methods = {'spa', 'full', 'anova_f', 'spa_lda_fast', 'spa_lda_greedy', 'lda_coef'}
+        if self.band_selection_method not in _known_methods:  # AI가 수정함:
+            self.band_selection_method = 'spa'  # AI가 수정함: unknown method → spa fallback
             
         # AI가 추가함: 제외 목록 복원
         if "excluded_files" in config:

@@ -250,7 +250,8 @@ class OptimizationWorker(QObject):
             dummy, 
             n_bands=n_features, 
             method=self.band_selection_method,  # AI가 수정함: 하드코딩 제거
-            exclude_indices=exclude_indices
+            exclude_indices=exclude_indices,
+            labels=self.cached_y  # AI가 수정함: supervised 밴드 선택 방법을 위해 cached_y 전달
         )
         
         # 3. Train

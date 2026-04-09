@@ -29,7 +29,7 @@ class TabTraining(QWidget):
         hbox_model = QHBoxLayout()
         hbox_model.addWidget(QLabel("Algorithm:"))
         self.combo_model = QComboBox()
-        self.combo_model.addItems(["Linear SVM", "PLS-DA", "LDA"]) 
+        self.combo_model.addItems(["Linear SVM", "PLS-DA", "LDA", "Ridge Classifier", "Logistic Regression"])  # AI가 수정함: Ridge Classifier, Logistic Regression 추가
         self.combo_model.setToolTip("Select training algorithm.\nLDA/PLS-DA are recommended for spectral data.")
         hbox_model.addWidget(self.combo_model)
         vbox.addLayout(hbox_model)
@@ -90,7 +90,7 @@ class TabTraining(QWidget):
         hbox_band_method = QHBoxLayout()
         hbox_band_method.addWidget(QLabel("Band Selection:"))
         self.combo_band_method = QComboBox()
-        self.combo_band_method.addItems(["SPA", "Full Band"])  # AI가 수정함: Variance → Full Band
+        self.combo_band_method.addItems(["SPA", "Full Band", "ANOVA-F", "SPA-LDA Fast", "SPA-LDA Greedy", "LDA-coef"])  # AI가 수정함: supervised 방법 4개 추가
         self.combo_band_method.setToolTip("SPA: Successive Projections (orthogonal), Full Band: Use all valid bands (no selection)")  # AI가 수정함: 툴팁 업데이트
         hbox_band_method.addWidget(self.combo_band_method)
         vbox.addLayout(hbox_band_method)
@@ -212,7 +212,7 @@ class TabTraining(QWidget):
             self.spin_ratio.setValue(self.vm.val_ratio)
             self.spin_bands.setValue(self.vm.n_features)
             # AI가 수정함: Band Selection Method 복원
-            _method_display = {"spa": "SPA", "full": "Full Band"}  # AI가 수정함: variance → full
+            _method_display = {"spa": "SPA", "full": "Full Band", "anova_f": "ANOVA-F", "spa_lda_fast": "SPA-LDA Fast", "spa_lda_greedy": "SPA-LDA Greedy", "lda_coef": "LDA-coef"}  # AI가 수정함: supervised 방법 4개 추가
             idx = self.combo_band_method.findText(_method_display.get(self.vm.band_selection_method, "SPA"))
             if idx >= 0: self.combo_band_method.setCurrentIndex(idx)
         finally:
@@ -285,7 +285,7 @@ class TabTraining(QWidget):
         self.vm.val_ratio = self.spin_ratio.value()
         self.vm.n_features = self.spin_bands.value()
         # AI가 수정함: Band Selection Method VM 동기화
-        _method_map = {"SPA": "spa", "Full Band": "full"}  # AI가 수정함: Variance → Full Band
+        _method_map = {"SPA": "spa", "Full Band": "full", "ANOVA-F": "anova_f", "SPA-LDA Fast": "spa_lda_fast", "SPA-LDA Greedy": "spa_lda_greedy", "LDA-coef": "lda_coef"}  # AI가 수정함: supervised 방법 4개 추가
         self.vm.band_selection_method = _method_map.get(self.combo_band_method.currentText(), "spa")
         # AI가 수정함: Full Band 모드에서 Number of Bands 스핀박스 비활성화
         self.spin_bands.setEnabled(self.vm.band_selection_method != "full")
