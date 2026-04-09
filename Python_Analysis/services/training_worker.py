@@ -314,28 +314,9 @@ class TrainingWorker(QObject):
                 
                 # 2. Check Base Data Cache (Dict)
                 if f in self.base_data_cache:
-                    # Cache Hit
-                    # if not silent: self.log_message.emit(f"   [Cache] '{os.path.basename(f)}'")
-                    data_base, mask = self.base_data_cache[f]  # (X, mask) ?? No, (X_base, y) stored?
-                    # Wait, VM stores (X_base, y) or (X_base, mask)?
-                    # TrainingWorker.base_data_ready emits (X, y)? 
-                    # Let's verify what we emit. We emit (X_base, y_chunk). OK.
-                    X_chunk = data_base
-                    # y_chunk is implicitly label_id? No, stored y might have labels.
-                    # Warning: stored y has fixed label_id. If Group Name changes -> Label ID changes.
-                    # So we should NOT rely on cached Y if Group mapping changed.
-                    # But cached X is fine.
-                    
-                    # Correction: We only cache X_base (Masked Data). 
-                    # Recalculating Y is cheap.
-                    # Check original emit logic:
-                    # self.base_data_ready.emit(X_base, y)
-                    # So we cached Y too.
-                    # Re-labeling is safer.
-                    
-                    # Update: Let's trust X_base. We recreate y based on current label_id.
-                    
-                    X_file = data_base # (Pixels, Bands)
+                    # Cache Hit: base_data_cache[f] = (X_base, None) — emit 시 None을 mask 자리에 넣음
+                    # AI가 수정함: cache contract 명시 — tuple은 항상 (X_base, None)이며 Y는 label_id로 재생성
+                    X_file, _mask = self.base_data_cache[f]  # mask 슬롯은 항상 None (캐시 불필요)
                 else:
                     # Cache Miss - Load & Process
                     display_name = f"{os.path.basename(os.path.dirname(f))}/{os.path.basename(f)}"
@@ -361,10 +342,10 @@ class TrainingWorker(QObject):
                         )
                         
                         # Update Cache (Emit)
+                        # AI가 수정함: cache contract — (X_base, None) 형태로 emit; mask는 캐시 불필요
                         try:
                             if X_file.shape[0] > 0:
-                                # self.log_message.emit(f"Emitting data for {os.path.basename(f)}")
-                                self.base_data_ready.emit(f, (X_file, None)) 
+                                self.base_data_ready.emit(f, (X_file, None))  # None: mask 슬롯 (사용 안 함)
                         except Exception as ex:
                             self.log_message.emit(f"Emit Failed for {f}: {ex}")
                             raise ex

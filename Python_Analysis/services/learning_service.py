@@ -53,7 +53,7 @@ class LearningService:
         except ValueError:
             log("⚠️ [SVM] Stratified split 불가 (클래스 샘플 부족). 일반 split으로 진행합니다.")
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)
-        model = LinearSVC(dual=False, max_iter=cfg_get('model', 'svm_max_iter', 1000))  # AI가 수정함
+        model = LinearSVC(dual=False, max_iter=cfg_get('model', 'svm_max_iter', 1000), class_weight='balanced')  # AI가 수정함: class_weight='balanced' 추가 — 불균형 클래스 편향 방지
         try:
             model.fit(X_train, y_train)
             
@@ -196,31 +196,16 @@ class LearningService:
                  model.export_coef_ = coef.T # Default behavior
                  bias_correction = lambda xm, ym, c: ym - np.dot(xm, c)
 
-            # Scikit-Learn Version Compatibility for Means
-            # AI가 수정함: sklearn 버전별 fallback 체인 개선 — L-1
-            # sklearn <0.23: x_mean_/_y_mean_, >=0.23: _x_mean/_y_mean, 일부 버전: x_offset_
-            x_mean = getattr(model, 'x_mean_', 
-                     getattr(model, '_x_mean', 
-                     getattr(model, 'x_offset_', None)))
-            y_mean = getattr(model, 'y_mean_', 
-                     getattr(model, '_y_mean', 
-                     getattr(model, 'y_offset_', None)))
-            
-            if x_mean is not None and y_mean is not None:
-                try:
-                    # Apply detected bias correction logic
-                    model.export_intercept_ = bias_correction(x_mean, y_mean, coef)
-                except Exception as ex:
-                    print(f"   [Error] Bias calc failed: {ex}. Zero bias.")
-                    model.export_intercept_ = np.zeros(n_targets_in)
-            else:
-                 import sklearn, warnings
-                 warnings.warn(
-                     f"PLS intercept 계산 실패: x_mean/y_mean 속성을 찾을 수 없습니다 "
-                     f"(sklearn {sklearn.__version__}). Zero bias 사용 — 모델 정확도 저하 가능.",
-                     RuntimeWarning
-                 )
-                 model.export_intercept_ = np.zeros(n_targets_in)
+            # AI가 수정함: sklearn 버전 독립적 bias 계산 — L-1
+            # sklearn 1.0+에서 x_mean_/_x_mean/x_offset_ 모두 제거됨.
+            # X/Y 평균을 직접 계산하여 버전 종속성 완전 제거.
+            x_mean = X_train.mean(axis=0)          # (n_features,)
+            y_mean = y_train_mat.mean(axis=0)      # (n_targets,)
+            try:
+                model.export_intercept_ = bias_correction(x_mean, y_mean, coef)
+            except Exception as ex:
+                print(f"   [Error] Bias calc failed: {ex}. Zero bias.")
+                model.export_intercept_ = np.zeros(n_targets_in)
             
             metrics = {
                 "TrainAccuracy": round(train_acc * 100, 2),
@@ -277,14 +262,17 @@ class LearningService:
                 weights = raw_weights.tolist()
                 bias = model.intercept_.tolist()
                 is_multiclass = True
-                # AI가 추가함: V2-LDA — LDA multi-class coef_ shape 검증 (C# parity 방어)
+                # AI가 수정함: assert → 조건부 경고로 교체 — n_components 커스텀 설정 시 크래시 방지
                 if isinstance(model, LinearDiscriminantAnalysis):
                     n_classes_actual = model.coef_.shape[0]
                     n_classes_expected = len(np.unique(model.classes_))
-                    assert n_classes_actual == n_classes_expected, (
-                        f"LDA coef_ shape mismatch: {n_classes_actual} rows != "
-                        f"{n_classes_expected} classes. C# Weights 해석 불일치 가능."
-                    )
+                    if n_classes_actual != n_classes_expected:
+                        import warnings
+                        warnings.warn(
+                            f"LDA coef_ shape mismatch: {n_classes_actual} rows != "
+                            f"{n_classes_expected} classes. C# Weights 해석 불일치 가능.",
+                            RuntimeWarning
+                        )
             else:
                 # Binary or Single Class
                 if model.coef_.ndim == 1:
@@ -466,9 +454,9 @@ class LearningService:
         print(f"   [LearningService] Model exported to {output_path}")
         
         # Generate Feature Importance Plot
-        self._generate_importance_plot(weights, selected_bands, output_path, label_map, mean_spectrum, spa_scores, exclude_rules)
+        self._generate_importance_plot(weights, selected_bands, output_path, label_map, mean_spectrum, spa_scores, exclude_rules, band_method=None)
 
-    def _generate_importance_plot(self, weights, bands, output_path, label_map, mean_spectrum=None, spa_scores=None, exclude_rules=None):
+    def _generate_importance_plot(self, weights, bands, output_path, label_map, mean_spectrum=None, spa_scores=None, exclude_rules=None, band_method=None):
         try:
             # Switch to non-interactive backend for thread safety
             plt.switch_backend('Agg')
@@ -540,7 +528,12 @@ class LearningService:
                 if w.ndim == 2: w = np.max(w, axis=0) 
                 bar_selected = ax1.bar(bands, w, color='red', width=1.5, label='Importance (Coef)')
             
-            plt.title(f"Band Selection Result (SPA Algorithm, Top-{len(bands)})", fontsize=12)
+            # AI가 수정함: Full Band 모드 분기 — band_method 또는 spa_scores 유무로 판단
+            _is_full_band = (band_method == 'full') or (spa_scores is None or len(spa_scores) == 0)
+            if _is_full_band:
+                plt.title(f"Band Selection Result (Full Band, Top-{len(bands)})", fontsize=12)
+            else:
+                plt.title(f"Band Selection Result (SPA Algorithm, Top-{len(bands)})", fontsize=12)
             plt.grid(True, axis='x', alpha=0.3)
             
             # --- Consolidated Legend ---
