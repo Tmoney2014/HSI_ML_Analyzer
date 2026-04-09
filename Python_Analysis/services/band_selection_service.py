@@ -1,9 +1,12 @@
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.feature_selection import f_classif  # AI가 수정함: ANOVA-F 방법 추가
 from scipy.signal import savgol_filter
 from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
-def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, keep_order=False):
+_SUPERVISED_METHODS = ('anova_f', 'spa_lda_fast', 'spa_lda_greedy', 'lda_coef')  # AI가 수정함: supervised 방법 목록 정의
+
+def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, keep_order=False, labels=None):  # AI가 수정함: labels 인자 추가
     # AI가 수정함: keep_order 파라미터 추가 - SPA 선택 순서 유지 옵션
     """
     Select top-k significant bands/wavelengths using SPA analysis.
@@ -11,8 +14,9 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
     Args:
         data_cube: (H, W, Bands) or (N, Bands) HSI Data
         n_bands: Number of bands to select
-        method: 'spa' (Successive Projections Algorithm) or 'full' (use all valid bands)  # AI가 수정함:
-        exclude_indices: List of band indices to ignore (e.g. water absorption)
+        method: 'spa' (Successive Projections Algorithm), 'full' (use all valid bands), or supervised methods<!-- AI가 수정함: method 설명 확장 -->
+        exclude_indices: List of band indices to ignore (e.g. water absorption)  # AI가 수정함: 기존 인자 설명 유지
+        labels: Supervised methods용 class labels (anova_f, spa_lda_fast, spa_lda_greedy, lda_coef)  # AI가 수정함: labels 설명 추가
         
     Returns:
         selected_bands: List[int] Indices of selected bands
@@ -28,8 +32,11 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         X = data_cube
         
     n_features = X.shape[1]
-    if method not in ('spa', 'full'):  # AI가 수정함: variance → full, unknown method 검증
-        raise ValueError(f"Unknown band selection method: {method!r}. Must be 'spa' or 'full'.")  # AI가 수정함:
+    if method not in ('spa', 'full') + _SUPERVISED_METHODS:  # AI가 수정함: supervised 방법 허용 및 unknown method 검증
+        raise ValueError(f"Unknown band selection method: {method!r}. Must be one of 'spa', 'full', 'anova_f', 'spa_lda_fast', 'spa_lda_greedy', 'lda_coef'.")  # AI가 수정함: 허용 method 메시지 갱신
+    # AI가 수정함: supervised 방법은 labels 필수
+    if method in _SUPERVISED_METHODS and labels is None:  # AI가 수정함: labels 누락 방지
+        raise ValueError(f"method='{method}' requires labels parameter (got None).")  # AI가 수정함: labels 필수 오류
     
     # Handle Exclusion
     valid_indices = np.arange(n_features)
@@ -54,11 +61,27 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         importance_scores = np.var(X, axis=0)  # AI가 수정함: importance 시각화용 (band_importance.png)
         selected_internal_indices = list(range(X.shape[1]))  # AI가 수정함:
         
+    elif method == 'anova_f':  # AI가 수정함: ANOVA-F supervised 방법
+        # 단일 클래스 가드
+        assert labels is not None  # AI가 수정함: Pyright 타입 좁히기 및 labels 비어있음 방지
+        if len(np.unique(labels)) < 2:  # AI가 수정함: 최소 2개 클래스 확인
+            raise ValueError("anova_f: 클래스가 2개 이상 필요합니다.")  # AI가 수정함: 클래스 수 오류
+        # labels를 X와 동일한 유효 밴드 슬라이싱 이후에 사용 (이미 exclude 처리됨)
+        f_scores, _ = f_classif(X, labels)  # AI가 수정함: ANOVA F-통계량 계산
+        f_scores = np.nan_to_num(f_scores, nan=0.0, posinf=0.0)  # AI가 수정함: 상수 밴드 NaN/Inf 방어
+        importance_scores = f_scores  # AI가 수정함: importance score를 F-통계량으로 사용
+        selected_internal_indices = list(np.argsort(f_scores)[::-1][:n_bands])  # AI가 수정함: 상위 밴드 선택
+        
+    elif method in _SUPERVISED_METHODS:  # AI가 수정함: Task 2 미구현 supervised method 차단
+        raise NotImplementedError(f"method='{method}' is not yet implemented. Use Task 2 to add it.")  # AI가 수정함: 미구현 방법 안내
+        
     else: # Default: SPA-like (using Projections or PCA Loadings)
         # Standard SPA Implementation
         # 1. Downsample if too large (for speed)
         # AI가 수정함: 설정 파일에서 값 로드
-        max_samples = cfg_get('spa', 'max_samples', 10000)
+        max_samples = cfg_get('spa', 'max_samples', 10000)  # AI가 수정함: config 값 로드
+        if not isinstance(max_samples, int):  # AI가 수정함: Pyright 타입 좁히기 및 설정값 방어
+            max_samples = 10000  # AI가 수정함: 비정상 설정값 기본값 대체
         if X.shape[0] > max_samples:
              # Just a safety cap for VERY large data (e.g. >10k) to prevent freezing
              # But use deterministic random
@@ -122,6 +145,9 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
             projection = np.dot(v, factor)      # (N, B)
             
             P = P - projection
+    # AI가 수정함: dispatch 완료 후 선택 결과가 비어 있으면 미구현 method로 처리
+    if not selected_internal_indices and method in _SUPERVISED_METHODS:  # AI가 수정함: supervised fallback 안전장치
+        raise NotImplementedError(f"method='{method}' dispatch not yet implemented.")  # AI가 수정함: dispatch 미구현 오류
             
     # Map back to original indices
     final_indices = [valid_indices[i] for i in selected_internal_indices]

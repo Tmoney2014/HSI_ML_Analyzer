@@ -6,10 +6,17 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.linear_model import RidgeClassifier, LogisticRegression  # AI가 수정함: Ridge, LogReg 추가
 
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-import matplotlib.pyplot as plt
-import seaborn as sns # Optional, for nicer plots if installed
+try:  # AI가 수정함: matplotlib 미설치 환경에서도 학습/내보내기 동작 보장
+    import matplotlib.pyplot as plt  # AI가 수정함: 플롯 생성용 선택 import
+except ImportError:  # AI가 수정함: matplotlib 없을 때 fallback 처리
+    plt = None  # AI가 수정함: plot 비활성화 플래그
+try:  # AI가 수정함: seaborn 선택 의존성도 안전하게 로드
+    import seaborn as sns  # AI가 수정함: 더 나은 플롯 스타일 옵션
+except ImportError:  # AI가 수정함: seaborn 없을 때 fallback 처리
+    sns = None  # AI가 수정함: seaborn 비활성화 플래그
 from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
 class LearningService:
@@ -40,6 +47,10 @@ class LearningService:
             return self._train_pls(X, y, test_ratio, log)
         elif model_type == "LDA":
             return self._train_lda(X, y, test_ratio, log)
+        elif model_type == "Ridge Classifier":  # AI가 수정함: Ridge Classifier 추가
+            return self._train_ridge(X, y, test_ratio, log)  # AI가 수정함: Ridge 학습 경로 연결
+        elif model_type == "Logistic Regression":  # AI가 수정함: Logistic Regression 추가
+            return self._train_logistic(X, y, test_ratio, log)  # AI가 수정함: LogReg 학습 경로 연결
         else:
             log(f"   [Error] Unknown Model Type: {model_type}, falling back to SVM.")
             return self._train_svm(X, y, test_ratio, log)
@@ -118,6 +129,81 @@ class LearningService:
         except Exception as e:
             log(f"   [Error] LDA Training Failed: {e}")
             raise
+
+    def _train_ridge(self, X, y, test_ratio, log):  # AI가 수정함: Ridge Classifier 학습 추가
+        # AI가 수정함: _train_svm 패턴 동일 — stratify=y 추가, 샘플 부족 시 fallback
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42, stratify=y)  # AI가 수정함: stratified split 우선 적용
+        except ValueError:
+            log("⚠️ [Ridge] Stratified split 불가 (클래스 샘플 부족). 일반 split으로 진행합니다.")  # AI가 수정함: 경고 로그 추가
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)  # AI가 수정함: fallback split 적용
+        model = RidgeClassifier(class_weight='balanced')  # AI가 수정함: class_weight='balanced' 불균형 클래스 대응
+        try:
+            model.fit(X_train, y_train)  # AI가 수정함: Ridge 학습 수행
+
+            y_train_pred = model.predict(X_train)  # AI가 수정함: train 예측값 계산
+            y_test_pred = model.predict(X_test)  # AI가 수정함: test 예측값 계산
+
+            train_acc = accuracy_score(y_train, y_train_pred)  # AI가 수정함: train 정확도 계산
+            test_acc = accuracy_score(y_test, y_test_pred)  # AI가 수정함: test 정확도 계산
+            gap = (train_acc - test_acc) * 100  # AI가 수정함: 과적합 gap 계산
+            f1 = f1_score(y_test, y_test_pred, average='macro')  # AI가 수정함: macro F1 계산
+
+            gap_warning = " ⚠️ 과적합 의심" if gap > 5 else ""  # AI가 수정함: gap 경고 문자열 생성
+            log(f"   [Ridge] Train: {train_acc*100:.2f}% | Test: {test_acc*100:.2f}% | Gap: {gap:.1f}%{gap_warning}")  # AI가 수정함: Ridge 성능 로그 출력
+            log(f"   [Ridge] F1 (Macro): {f1:.3f}")  # AI가 수정함: Ridge F1 로그 출력
+
+            metrics = {  # AI가 수정함: Ridge metrics 구성
+                "TrainAccuracy": round(train_acc * 100, 2),  # AI가 수정함: train 정확도 저장
+                "TestAccuracy": round(test_acc * 100, 2),  # AI가 수정함: test 정확도 저장
+                "F1Score": round(f1, 4),  # AI가 수정함: F1 저장
+                "TotalSamples": int(len(y)),  # AI가 수정함: 총 샘플 수 저장
+                "TestSplit": test_ratio  # AI가 수정함: test 비율 저장
+            }  # AI가 수정함: Ridge metrics 종료
+            return model, metrics  # AI가 수정함: Ridge 모델과 메트릭 반환
+        except Exception as e:
+            log(f"   [Error] Ridge Training Failed: {e}")  # AI가 수정함: Ridge 학습 실패 로그
+            raise  # AI가 수정함: 예외 재발생
+
+    def _train_logistic(self, X, y, test_ratio, log):  # AI가 수정함: Logistic Regression 학습 추가
+        # AI가 수정함: _train_svm 패턴 동일 — stratify=y 추가, 샘플 부족 시 fallback
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42, stratify=y)  # AI가 수정함: stratified split 우선 적용
+        except ValueError:
+            log("⚠️ [LogReg] Stratified split 불가 (클래스 샘플 부족). 일반 split으로 진행합니다.")  # AI가 수정함: 경고 로그 추가
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=42)  # AI가 수정함: fallback split 적용
+        model = LogisticRegression(  # AI가 수정함: LogisticRegression 모델 생성
+            max_iter=cfg_get('model', 'logistic_max_iter', 1000),  # AI가 수정함: 반복 횟수 설정값 사용
+            class_weight='balanced',  # AI가 수정함: 불균형 클래스 대응
+            solver='lbfgs',  # AI가 수정함: multinomial 호환 solver 지정
+            multi_class='multinomial'  # AI가 수정함: C# runtime weight shape 일관성 확보
+        )  # AI가 수정함: LogisticRegression 생성 종료
+        try:
+            model.fit(X_train, y_train)  # AI가 수정함: Logistic Regression 학습 수행
+
+            y_train_pred = model.predict(X_train)  # AI가 수정함: train 예측값 계산
+            y_test_pred = model.predict(X_test)  # AI가 수정함: test 예측값 계산
+
+            train_acc = accuracy_score(y_train, y_train_pred)  # AI가 수정함: train 정확도 계산
+            test_acc = accuracy_score(y_test, y_test_pred)  # AI가 수정함: test 정확도 계산
+            gap = (train_acc - test_acc) * 100  # AI가 수정함: 과적합 gap 계산
+            f1 = f1_score(y_test, y_test_pred, average='macro')  # AI가 수정함: macro F1 계산
+
+            gap_warning = " ⚠️ 과적합 의심" if gap > 5 else ""  # AI가 수정함: gap 경고 문자열 생성
+            log(f"   [LogReg] Train: {train_acc*100:.2f}% | Test: {test_acc*100:.2f}% | Gap: {gap:.1f}%{gap_warning}")  # AI가 수정함: LogReg 성능 로그 출력
+            log(f"   [LogReg] F1 (Macro): {f1:.3f}")  # AI가 수정함: LogReg F1 로그 출력
+
+            metrics = {  # AI가 수정함: LogReg metrics 구성
+                "TrainAccuracy": round(train_acc * 100, 2),  # AI가 수정함: train 정확도 저장
+                "TestAccuracy": round(test_acc * 100, 2),  # AI가 수정함: test 정확도 저장
+                "F1Score": round(f1, 4),  # AI가 수정함: F1 저장
+                "TotalSamples": int(len(y)),  # AI가 수정함: 총 샘플 수 저장
+                "TestSplit": test_ratio  # AI가 수정함: test 비율 저장
+            }  # AI가 수정함: LogReg metrics 종료
+            return model, metrics  # AI가 수정함: LogReg 모델과 메트릭 반환
+        except Exception as e:
+            log(f"   [Error] Logistic Training Failed: {e}")  # AI가 수정함: Logistic 학습 실패 로그
+            raise  # AI가 수정함: 예외 재발생
 
     def _train_pls(self, X, y, test_ratio, log):
         """
@@ -249,7 +335,7 @@ class LearningService:
             total_bands = len(mean_spectrum)
 
         # 1. Extract Weights based on Model Type
-        if isinstance(model, LinearSVC) or isinstance(model, LinearDiscriminantAnalysis):
+        if isinstance(model, (LinearSVC, LinearDiscriminantAnalysis, RidgeClassifier, LogisticRegression)):  # AI가 수정함: Ridge, LogReg 추가 — isinstance 체인 확장
             # Both LinearSVC and LDA share similar coef_ structure
             if model.coef_.ndim > 1 and model.coef_.shape[0] > 1:
                 raw_weights = np.array(model.coef_)  # shape: (n_classes, n_features_original)
@@ -458,6 +544,9 @@ class LearningService:
 
     def _generate_importance_plot(self, weights, bands, output_path, label_map, mean_spectrum=None, spa_scores=None, exclude_rules=None, band_method=None):
         try:
+            if plt is None:  # AI가 수정함: matplotlib 미설치 시 플롯 생성을 건너뜀
+                print("   [LearningService] Matplotlib unavailable; skipping importance plot.")  # AI가 수정함: 스킵 로그 출력
+                return  # AI가 수정함: 플롯 생성 조기 종료
             # Switch to non-interactive backend for thread safety
             plt.switch_backend('Agg')
             
