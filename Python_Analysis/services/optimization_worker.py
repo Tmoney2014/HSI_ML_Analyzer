@@ -244,7 +244,7 @@ class OptimizationWorker(QObject):
                         exclude_indices.extend(range(start - 1, end))
                     else:
                         exclude_indices.append(int(part) - 1)
-            except: pass
+            except (ValueError, TypeError): pass  # AI가 수정함: bare except → specific types (코드 품질)
         
         # AI가 수정함: Gap Diff로 밴드 수가 줄어들면 범위 초과 인덱스 무시
         n_bands = X.shape[1]

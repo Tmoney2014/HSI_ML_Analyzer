@@ -69,6 +69,8 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
 
         # AI가 수정함: 출력 디렉토리 생성 (존재해도 에러 없음)
         os.makedirs(output_dir, exist_ok=True)  # AI가 수정함: 디렉토리 보장
+        _exp_dir = os.path.join(output_dir, 'experiments')  # AI가 수정함: experiments 서브디렉토리 경로
+        os.makedirs(_exp_dir, exist_ok=True)  # AI가 수정함: experiments 서브디렉토리 생성
 
         # AI가 수정함: 결과 누적 리스트
         results = []  # AI가 수정함: trial 결과 dict 목록
@@ -178,6 +180,14 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                     }  # AI가 수정함: 결과 dict 종료
                     results.append(row)  # AI가 수정함: 결과 누적
 
+                    # AI가 수정함: per-trial CSV 저장 ({timestamp}_{method}_{model}.csv 패턴, 플랜 line 90)
+                    _trial_csv_name = f"{trial_ts}_{bm}_{mt}.csv"  # AI가 수정함: trial 파일명
+                    _trial_csv_path = os.path.join(_exp_dir, _trial_csv_name)  # AI가 수정함: trial CSV 경로
+                    with open(_trial_csv_path, "w", newline="", encoding="utf-8") as _tf:  # AI가 수정함: trial CSV 파일 열기
+                        _tw = csv.DictWriter(_tf, fieldnames=_CSV_FIELDNAMES)  # AI가 수정함: DictWriter 생성
+                        _tw.writeheader()  # AI가 수정함: 헤더 행 기록
+                        _tw.writerow(row)  # AI가 수정함: 단일 trial 결과 행 기록
+
                     _log(  # AI가 수정함: trial 완료 로그
                         f"[ExperimentRunner] OK | {bm}/{mt} | "
                         f"train={train_acc:.2f}% test={test_acc:.2f}% "
@@ -214,7 +224,7 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
         # AI가 수정함: 타임스탬프 기반 파일명 생성
         csv_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # AI가 수정함: CSV 파일용 타임스탬프
         csv_filename = f"{csv_timestamp}_experiment_grid.csv"  # AI가 수정함: 파일명 구성
-        csv_path = os.path.join(output_dir, csv_filename)  # AI가 수정함: 전체 경로 구성
+        csv_path = os.path.join(_exp_dir, csv_filename)  # AI가 수정함: experiments 서브디렉토리에 저장
 
         # AI가 수정함: CSV 파일 쓰기 (12컬럼 고정 스키마)
         with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:  # AI가 수정함: CSV 파일 열기

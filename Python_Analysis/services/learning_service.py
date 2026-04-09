@@ -590,7 +590,7 @@ class LearningService:
                     # Add dummy handle for legend
                     # We can't easily get handle from axvspan unless saved, so create a Patch
                     # exp_patch = mpatches.Patch(color='#E0E0E0', label='Excluded Region')
-                except:
+                except Exception:  # AI가 수정함: bare except → Exception (코드 품질)
                     pass
 
             # --- 2. Background: Mean Spectrum (Right Axis) ---
