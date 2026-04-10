@@ -4,7 +4,7 @@ agent: build
 subtask: true
 ---
 
-`Python_Analysis/models/processing.py`의 순수 수학 함수들이 C# FlashHSI 런타임과 수학적으로 동일한 결과를 내는지 검증합니다.
+`Python_Analysis`가 생성하는 최신 `model.json` 계약과 `models/processing.py` 수학이 C# FlashHSI 런타임에서 동일하게 재현되는지 검증합니다.  <!-- AI가 수정함: Python exporter contract까지 패리티 범위 확장 -->
 
 ## 배경
 
@@ -12,7 +12,13 @@ HSI_ML_Analyzer는 두 파트로 구성됩니다:
 - **Part 1 (이 레포)**: Python/PyQt5 오프라인 학습기 → `model.json` 출력
 - **Part 2 (C# FlashHSI 레포)**: >250 ~ 700 FPS 실시간 런타임 — `model.json` 소비
 
-`models/processing.py`의 함수들은 C# 런타임과 **수학적으로 동일**해야 합니다. 패리티가 깨지면 학습 결과가 런타임에서 다르게 동작합니다.
+Python 학습기는 **패리티의 모체(source contract)** 이고, C# FlashHSI는 그 결과(`model.json`)를 소비하는 런타임입니다.  <!-- AI가 수정함: Python-first contract 관계 명시 -->
+따라서 패리티 검증은 두 축을 모두 봐야 합니다.  <!-- AI가 수정함 -->
+
+1. `models/processing.py` 및 `ProcessingService`의 수학/순서가 C#에서 동일한가  <!-- AI가 수정함 -->
+2. `learning_service.py::export_model()`이 기록한 계약(`OriginalType`, `IsMultiClass`, `RequiredRawBands`, `PrepChainOrder`, `Weights`, `Bias`)을 C#이 올바르게 소비하는가  <!-- AI가 수정함 -->
+
+패리티가 깨지면 학습 결과가 런타임에서 다르게 동작합니다.  <!-- AI가 수정함 -->
 
 ## C# 런타임 구현 위치 (FlashHSI)
 
@@ -103,10 +109,34 @@ if (std > 1e-9) { ... }
 
 **✅ 동일**: L2 Euclidean norm + zero-guard 정책 일치.
 
+## 추가 계약 검증 포인트 (model-aware contract)  <!-- AI가 수정함: 모델별 shape 계약 섹션 추가 -->
+
+### `learning_service.py::export_model()` ↔ `FlashHSI.Core/ModelData.cs`
+
+**핵심 원칙:**  <!-- AI가 수정함 -->
+- Python은 model-specific shape를 유지한다.  <!-- AI가 수정함 -->
+- C#은 `OriginalType` + `IsMultiClass`를 먼저 읽고 `Weights` / `Bias` shape를 해석해야 한다.  <!-- AI가 수정함 -->
+
+**필수 확인 필드:**  <!-- AI가 수정함 -->
+- `OriginalType`  <!-- AI가 수정함 -->
+- `IsMultiClass`  <!-- AI가 수정함 -->
+- `SelectedBands`  <!-- AI가 수정함 -->
+- `RequiredRawBands`  <!-- AI가 수정함 -->
+- `PrepChainOrder`  <!-- AI가 수정함 -->
+- `Weights`  <!-- AI가 수정함 -->
+- `Bias`  <!-- AI가 수정함 -->
+
+**검증 포인트:**  <!-- AI가 수정함 -->
+- `OriginalType`별 `Weights` / `Bias` shape가 Python 문서 계약과 일치하는가  <!-- AI가 수정함 -->
+- C# loader가 binary / multiclass를 `IsMultiClass` 기준으로 안정적으로 해석하는가  <!-- AI가 수정함 -->
+- `SelectedBands`의 정렬 순서가 C# feature column order와 동일한가  <!-- AI가 수정함 -->
+- `RequiredRawBands`가 authoritative raw-band contract로 사용되는가  <!-- AI가 수정함 -->
+- `EstimatedFPS`는 metadata로만 취급되고 runtime correctness 판단에 사용되지 않는가  <!-- AI가 수정함 -->
+
 ## 검증 절차
 
 1. `Python_Analysis/models/processing.py` 전체 내용 읽기
-2. `Python_Analysis/services/learning_service.py`의 `export_model()` 읽기 (`RequiredRawBands`, `PrepChainOrder` 계산 로직)
+2. `Python_Analysis/services/learning_service.py`의 `export_model()` 읽기 (`OriginalType`, `IsMultiClass`, `RequiredRawBands`, `PrepChainOrder`, `Weights`, `Bias` 계약 확인)  <!-- AI가 수정함 -->
 3. `Python_Analysis/services/processing_service.py`의 `get_base_data()` + `apply_preprocessing_chain()` 읽기 (Absorbance 위치, 체인 순서 확인)
 4. 각 함수별 위 표와 대조하여 수식 확인
 5. **LogGapFeatureExtractor 부호/공식** 집중 검토:
@@ -116,8 +146,9 @@ if (std > 1e-9) { ... }
 6. `apply_snv()`가 `ProcessingService.process_cube()`나 워커에서 실제 호출되는지 grep
 7. `RequiredRawBands` 계산 로직이 gap + order와 정합하는지 확인
 8. `HsiPipeline.RegisterProcessorsByChainOrder()`가 `PrepChainOrder`를 재현하는지 확인
-9. 잠재적 패리티 위험 목록 출력
-10. `DerivOrder > 1` 모델인 경우 C# 런타임의 동등 차수 미분 재현 여부를 별도 확인 (미확인 시 ⚠️)
+9. `ModelData.cs` / 분류기 계층이 `OriginalType` + `IsMultiClass` 기준으로 `Weights` / `Bias`를 해석하는지 확인  <!-- AI가 수정함 -->
+10. 잠재적 패리티 위험 목록 출력
+11. `DerivOrder > 1` 모델인 경우 C# 런타임의 동등 차수 미분 재현 여부를 별도 확인 (미확인 시 ⚠️)
 
 ## 출력 형식
 
@@ -166,6 +197,11 @@ if (std > 1e-9) { ... }
 - Python export_model() 출력: PrepChainOrder
 - C# LoadModel()/RegisterProcessorsByChainOrder() 재현 여부: ...
 - 상태: ✅ 안전 / ⚠️ 주의 / ❌ 위험
+
+[Model-specific schema parity]  <!-- AI가 수정함: 모델별 shape 계약 진단 섹션 추가 -->
+- Python export_model() 출력: OriginalType / IsMultiClass / Weights / Bias
+- C# LoadModel() 해석 규칙: ...
+- 모델별 shape 일치 여부: ✅ / ⚠️ / ❌
 
 [종합 의견]
 - 즉시 수정 필요: ...
