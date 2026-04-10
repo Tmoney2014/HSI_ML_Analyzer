@@ -1,7 +1,7 @@
 # HSI Data Analysis & Learning Pipeline Specification
 
-> **Version**: 1.0  
-> **Last Updated**: 2026-02-04  
+> **Version**: 1.1  
+> **Last Updated**: 2026-04-10  
 > **Status**: **Invariant (불변 기준)**
 
 ---
@@ -31,6 +31,10 @@
 학습된 모델(`.json`)은 C# 런타임이 **별도의 Python 의존성 없이** 독립적으로 실행할 수 있어야 한다.
 - 이를 위해 모델 파일에는 `RequiredRawBands`, `Preprocessing Config` 등 **데이터를 재구성하기 위한 모든 메타데이터**가 포함되어야 한다.
 - 학습 시 `Exclude Bands`는 밴드 선택 후보에서 제외되어야 하며, 그 결과가 `SelectedBands`/`RequiredRawBands`에 반영되어야 한다.
+- `SelectedBands`, `RequiredRawBands`는 **0-based** 인덱스 계약을 유지해야 한다.  <!-- AI가 수정함: export contract 명시 -->
+- `PrepChainOrder`는 Python에서 실제 적용된 preprocessing step 순서를 기록하며, C# 런타임은 이를 우선 재현해야 한다.  <!-- AI가 수정함: 순서 계약 명시 -->
+- `Weights` / `Bias` shape는 단일 universal shape가 아니라 `OriginalType` + `IsMultiClass` 기준의 **model-specific contract**로 해석해야 한다.  <!-- AI가 수정함: Option 2 반영 -->
+- `EstimatedFPS`는 runtime correctness 필드가 아니라 diagnostic metadata로 분류한다.  <!-- AI가 수정함: metadata 구분 명시 -->
 
 ---
 
@@ -86,13 +90,17 @@
     - 모델 파일이 C#에서 돌아가기 위해 다음 정보가 필수적으로 포함됨:
         - `InputBands`: 원본 Raw 데이터의 밴드 인덱스 목록 (`RequiredRawBands`).
         - `Preprocessing`: 적용된 전처리 파이프라인 설정값 (`SG Win`, `Poly`, `Deriv Order` 등).
-        - `Weights & Bias`: 선형 모델의 계수.
+        - `PrepChainOrder`: Python에서 실제 적용된 전처리 step 순서.  <!-- AI가 수정함: runtime 재현용 필드 추가 -->
+        - `OriginalType` / `IsMultiClass`: 모델별 `Weights` / `Bias` shape 해석에 필요한 계약 필드.  <!-- AI가 수정함: model-aware contract 추가 -->
+        - `Weights & Bias`: 선형 모델의 계수. shape는 `OriginalType` + `IsMultiClass` 기준으로 해석한다.  <!-- AI가 수정함: shape 해석 기준 보강 -->
         - `Labels & Colors`: 클래스 이름 및 색상 매핑.
+        - `EstimatedFPS`: 진단/운영 표시용 metadata (runtime correctness 비필수).  <!-- AI가 수정함: metadata 성격 추가 -->
+        - `total_bands` (센서 전체 밴드 수)는 `export_model()`의 **필수** 입력 파라미터입니다. `RequiredRawBands` 상한 클램프에 사용되며, `None` 또는 `0` 이하 값을 전달하면 `ValueError`가 발생합니다. 호출자는 전처리로 차원이 줄어들기 전의 Raw 밴드 수를 전달해야 합니다.  <!-- AI가 추가함: total_bands 필수 invariant -->
 
 ---
 
 ## 4. Maintenance Guide (유지보수 가이드)
 
 - **전처리 추가 시**: `ProcessingService.apply_preprocessing_chain`에 로직을 추가하고, `TabAnalysis`의 `default_steps`에 기본 파라미터를 정의한다. **기본값은 `None`이 아닌 Dict 형태여야 한다.**
-- **모델 타입 추가 시**: `LearningService.export_model`에서 해당 모델의 가중치(`coef_`)와 편향(`intercept_`)을 추출하는 로직을 추가해야 한다.
+- **모델 타입 추가 시**: `LearningService.export_model`에서 해당 모델의 가중치(`coef_`)와 편향(`intercept_`)을 추출하는 로직을 추가하고, `OriginalType` / `IsMultiClass` 기준의 shape contract를 문서와 parity 검증 절차에 함께 반영해야 한다.  <!-- AI가 수정함: model-aware contract 유지보수 규칙 추가 -->
 - **참조 데이터 변경 시**: `TrainingWorker`는 참조 데이터가 변경되면 캐시를 무효화하고 처음부터 다시 로드해야 한다.

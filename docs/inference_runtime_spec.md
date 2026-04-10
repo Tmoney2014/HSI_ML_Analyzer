@@ -1,8 +1,8 @@
 # 🧠 C# Inference Runtime Specification for HSI
 
-> **문서 버전**: v1.0  
+> **문서 버전**: v1.1  
 > **대상 독자**: C# 런타임 개발자  
-> **목적**: Python에서 학습된 모델(`model_config.json`)을 C#에서 로드하고, 실시간(Real-time)으로 추론하기 위한 구현 명세 정의
+> **목적**: Python에서 학습된 모델(`model.json`)을 C#에서 로드하고, 실시간(Real-time)으로 추론하기 위한 구현 명세 정의  <!-- AI가 수정함: 실제 export 파일명으로 정정 -->
 
 ---
 
@@ -13,24 +13,31 @@
 
 ---
 
-## 2. 모델 파일 (`model_config.json`) 구조
+## 2. 모델 파일 (`model.json`) 구조  <!-- AI가 수정함: 실제 파일명 반영 -->
 
 ### 2.1. JSON Schema
 
 ```json
 {
-  "ModelType": "LinearModel",     // (string) 고정값. Linear SVM 또는 LDA
+  "ModelType": "LinearModel",     // (string) 상위 카테고리. 세부 해석은 OriginalType 참고  <!-- AI가 수정함: ModelType 의미 보강 -->
+  "OriginalType": "LogisticRegression", // (string) Python 원본 estimator 이름  <!-- AI가 수정함: 모델별 shape 해석 기준 추가 -->
+  "IsMultiClass": true,            // (bool) Weights/Bias shape 해석 보조 플래그  <!-- AI가 수정함 -->
+  "ModelName": "my_model",       // (string) 표시용 이름 (optional metadata)  <!-- AI가 수정함 -->
+  "Description": "...",          // (string) 설명 (optional metadata)  <!-- AI가 수정함 -->
+  "Timestamp": "2026-04-10 10:30:00", // (string) export 시각 (optional metadata)  <!-- AI가 수정함 -->
   "SelectedBands": [10, 25, ...], // (int[]) 학습에 사용된 Feature 밴드 인덱스 (0-based)
   "RequiredRawBands": [5, 10...], // (int[]) 전처리를 위해 로드해야 할 실제 원본 밴드 목록 (C# 최적화용)
+  "EstimatedFPS": 732.81,         // (double) metadata only - 진단/표시용 추정값  <!-- AI가 수정함 -->
+  "PrepChainOrder": ["SG", "SimpleDeriv", "MinMax"], // (string[]) Python 적용 순서  <!-- AI가 수정함 -->
   "Performance": { ... },         // (object) 학습 당시 정확도 (참고용)
   
   // 핵심: 선형 모델 계수 (y = Wx + b)
-  // Weights: [Class][Feature] 형태의 2차원 배열
+  // 주의: Weights/Bias shape는 OriginalType + IsMultiClass에 따라 달라질 수 있음  <!-- AI가 수정함: 단일 shape 가정 제거 -->
   "Weights": [
     [-0.12, 0.45, ... ], // Class 0의 가중치
     [0.05, -0.91, ... ]  // Class 1의 가중치
   ],
-  "Bias": [-1.2, 0.5, ...], // (double[]) 각 클래스별 Bias (Intercept)
+  "Bias": [-1.2, 0.5, ...], // (double[] | double) Bias (Intercept) - shape는 model-specific  <!-- AI가 수정함 -->
 
   // 핵심: 전처리 파이프라인
   "Preprocessing": {
@@ -43,9 +50,83 @@
   },
 
   "Labels": { "0": "PET", "1": "PP", ... }, // (dict) 클래스 ID -> 이름 매핑
-  "Colors": { "0": "#FF0000", ... }         // (dict) 시각화용 색상 코드
+  "Colors": { "0": "#FF0000", ... },        // (dict) 시각화용 색상 코드
+  "ExcludeBands": "1,3,7"                     // (string) 학습 당시 제외 규칙 기록 (runtime 직접 해석보다 결과값 신뢰 권장)  <!-- AI가 수정함 -->
 }
 ```
+
+### 2.2. `Weights` / `Bias` 해석 규칙 (Model-Specific Contract)  <!-- AI가 수정함: 모델별 shape 규칙 추가 -->
+
+런타임은 `Weights` / `Bias`를 읽기 전에 반드시 `OriginalType`과 `IsMultiClass`를 먼저 확인해야 합니다.  <!-- AI가 수정함 -->
+
+`ModelType == "LinearModel"`은 상위 카테고리일 뿐이며, 실제 parsing 규칙은 `OriginalType`가 결정합니다.  <!-- AI가 수정함 -->
+
+| OriginalType | IsMultiClass | Weights shape | Bias shape | Runtime 해석 메모 |
+|---|---:|---|---|---|
+| `LinearSVC` | `false` | `[Feature]` | `double` | binary linear classifier |
+| `LinearSVC` | `true` | `[Class][Feature]` | `[Class]` | OvR multiclass |
+| `LogisticRegression` | `false` | `[Feature]` | `double` | Python exporter가 binary row를 flat하게 내보냄  <!-- AI가 수정함 --> |
+| `LogisticRegression` | `true` | `[Class][Feature]` | `[Class]` | multinomial / multiclass linear model |
+| `RidgeClassifier` | `false` | `[Feature]` | `double` | Python exporter가 binary row를 flat하게 내보냄  <!-- AI가 수정함 --> |
+| `RidgeClassifier` | `true` | `[Class][Feature]` | `[Class]` | multiclass linear model |
+| `LinearDiscriminantAnalysis` | `false` | `[Feature]` | `double` | binary LDA export |
+| `LinearDiscriminantAnalysis` | `true` | `[Class][Feature]` 또는 exporter가 허용한 row shape | `[Class]` | `coef_` row count는 구현/설정 영향을 받을 수 있으므로 `OriginalType`과 exporter policy를 함께 확인  <!-- AI가 수정함 --> |
+| `PLSRegression` | `false` | `[Feature]` | `double` | Python exporter의 `export_coef_` / `export_intercept_` 기준 |
+| `PLSRegression` | `true` | `[Class][Feature]` | `[Class]` | Python exporter가 `export_coef_`를 class-major로 정규화한 결과 사용 |
+
+### 2.2.1. Sample JSON Snippets  <!-- AI가 수정함: 구체적 Weights/Bias shape 예시 추가 -->
+
+아래 예시는 `OriginalType`과 `IsMultiClass` 조합에 따른 `Weights`/`Bias` shape를 보여줍니다. 전체 shape 규칙은 표 2.2 참조.
+
+**Binary 예시 (LinearSVC, IsMultiClass=false):**
+
+```json
+{
+  "OriginalType": "LinearSVC",
+  "IsMultiClass": false,
+  "Weights": [0.12, -0.45, 0.33, 0.07, -0.21],
+  "Bias": 0.05
+}
+```
+
+**Multiclass 예시 (LogisticRegression, IsMultiClass=true, 3 classes):**
+
+```json
+{
+  "OriginalType": "LogisticRegression",
+  "IsMultiClass": true,
+  "Weights": [
+    [0.12, -0.45, 0.33, 0.07, -0.21],
+    [-0.10, 0.20, -0.15, 0.05, 0.08],
+    [0.03, -0.11, 0.09, -0.04, 0.13]
+  ],
+  "Bias": [-0.05, 0.02, 0.03]
+}
+```
+
+위 형식은 `OriginalType`과 `IsMultiClass` 조합에 따른 Weights/Bias shape를 보여줍니다. 전체 shape 규칙은 표 2.2 참조.
+
+### 2.3. Field classification  <!-- AI가 수정함: runtime-critical vs metadata 구분 추가 -->
+
+#### Runtime-critical  <!-- AI가 수정함 -->
+- `SelectedBands`  <!-- AI가 수정함 -->
+- `RequiredRawBands`  <!-- AI가 수정함 -->
+- `Weights`  <!-- AI가 수정함 -->
+- `Bias`  <!-- AI가 수정함 -->
+- `Preprocessing`  <!-- AI가 수정함 -->
+- `PrepChainOrder`  <!-- AI가 수정함 -->
+- `OriginalType`  <!-- AI가 수정함 -->
+- `IsMultiClass`  <!-- AI가 수정함 -->
+
+#### Optional metadata  <!-- AI가 수정함 -->
+- `ModelName`  <!-- AI가 수정함 -->
+- `Description`  <!-- AI가 수정함 -->
+- `Timestamp`  <!-- AI가 수정함 -->
+- `Performance`  <!-- AI가 수정함 -->
+- `Colors`  <!-- AI가 수정함 -->
+- `Labels`  <!-- AI가 수정함 -->
+- `ExcludeBands`  <!-- AI가 수정함 -->
+- `EstimatedFPS`  <!-- AI가 수정함 -->
 
 ---
 
@@ -59,9 +140,8 @@
 
 우선순위(권장/현행 런타임 반영):
 1. 런타임에서 사용자가 동적으로 바꾼 현재 마스크 상태
-2. model.json C# 전용 필드 (`MaskMode`, `MaskBandIndex`, `MaskLessThan`, `MaskThreshold`, `MaskRuleConditionsData`)
-3. model.json 공통 필드 (`MaskRules`, `Threshold`)
-4. 기본값 (`Mean`)
+2. model.json 공통 필드 (`MaskRules`, `Threshold`)
+3. 기본값 (`Mean`)
 
 모델 설정의 `MaskRules` 문자열은 폴백 경로에서 동적으로 파싱/적용해야 합니다.
 사용자는 검은 배경(`> Threshold`) 또는 알루미늄 배경(`< Threshold`)을 선택할 수 있으므로, 런타임은 부등호를 파싱하여 두 경우를 모두 지원해야 합니다.
@@ -92,8 +172,10 @@
 
 ### Step 2: Preprocessing (Dynamic Chain)
 
-모델 설정 파일(`model_config.json`)의 `Preprocessing` 섹션에 정의된 플래그들을 순서대로 확인하여 적용해야 합니다.
-**단, 연산 순서(Order of Operations)는 모델 파일의 JSON 키 순서가 아니라 아래에 정의된 논리적 순서를 따라야 안전합니다.**
+모델 설정 파일(`model.json`)의 `Preprocessing` 섹션과 `PrepChainOrder`를 기준으로 적용해야 합니다.  <!-- AI가 수정함: 파일명/입력 기준 업데이트 -->
+**우선순위는 `PrepChainOrder` > documented fallback order입니다.** `PrepChainOrder`가 존재하면 그 순서를 우선 재현하고, 없을 때만 아래에 정의된 논리적 fallback 순서를 사용합니다.  <!-- AI가 수정함 -->
+
+> **Note**: `EstimatedFPS` in `model.json` is **diagnostic metadata only**. Do not use it as a correctness or timing input at runtime. Actual camera throughput depends on hardware, interface bandwidth, and runtime scheduling — `EstimatedFPS` is a theoretical estimate computed during training.  <!-- AI가 추가함: diagnostic-only footnote -->
 
 #### 1. Data Mode Conversion
 카메라로부터 **Raw Data (DN)**가 입력된다고 가정합니다.

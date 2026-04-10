@@ -10,9 +10,9 @@
 
 | 문제 | 해결책 |
 |------|--------|
-| 154개 밴드 전체 사용 시 700 FPS 불가 | **SPA**로 최적 5개 직교 밴드 선택 |
+| 154개 밴드 전체 사용 시 700 FPS 불가 | **SPA / 지도형 밴드 선택**으로 소수 핵심 밴드 압축 |
 | MROI 환경에서 전체 통계(SNV) 사용 불가 | **Log-Gap-Diff**로 조명 변화 상쇄 |
-| 복잡한 모델(SVM, DL)은 느림 | **LDA** 단순 행렬 연산으로 99% 정확도 |
+| 복잡한 비선형 모델(DL, kernel SVM)은 느림 | **선형 모델 + 경량 전처리**로 고속 추론 유지 |
 
 ---
 
@@ -21,7 +21,7 @@
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │ Part 1. 오프라인 학습 (Python) ← 현재 저장소                   │
-│   Raw HSI → SPA 밴드 선택 → Log-Gap-Diff 전처리 → LDA 학습    │
+│   Raw HSI → 밴드 선택 → 전처리 체인 → 선형 모델 학습          │
 │                         ↓                                     │
 │                   model.json Export                           │
 └───────────────────────────────────────────────────────────────┘
@@ -92,8 +92,8 @@ Python_Analysis/
 - 전처리 파이프라인 (SG, Gap Diff)
 
 ### 3. 학습 & 최적화
-- SPA 기반 밴드 선택
-- LDA, SVM, PLS-DA 모델 지원
+- SPA, ANOVA-F, SPA-LDA, LDA-coef, Full Band 선택 지원
+- LDA, SVM, PLS-DA, Ridge, Logistic Regression 모델 지원
 - Auto-ML 최적화 (Gap, NDI, 밴드 수)
 
 ### 4. Export
@@ -107,17 +107,44 @@ Python_Analysis/
 ```json
 {
   "ModelType": "LinearModel",
+  "OriginalType": "LogisticRegression",
+  "IsMultiClass": true,
   "SelectedBands": [40, 42, 97, 99, 105],
   "RequiredRawBands": [40, 42, 45, 47, 97, 99, 102, 104, 105, 110],
+  "EstimatedFPS": 732.81,  // (double) Diagnostic estimate only — not a runtime correctness field. See inference_runtime_spec.md.
+  "PrepChainOrder": ["SG", "SimpleDeriv", "MinMax"],
   "Weights": [[...], [...]],
   "Bias": [...],
   "Preprocessing": {
+    "Mode": "Raw",
+    "ApplySG": true,
+    "SGWin": 5,
+    "SGPoly": 2,
+    "SGDeriv": 0,
     "ApplyDeriv": true,
-    "Gap": 5
+    "Gap": 5,
+    "DerivOrder": 1
   },
-  "Labels": { "0": "PP", "1": "PE" }
+  "Labels": { "0": "PP", "1": "PE" },
+  "Colors": { "0": "#00FF00", "1": "#FF0000" }
 }
 ```
+
+> 참고: `Weights` / `Bias`의 정확한 shape는 `OriginalType`과 `IsMultiClass`에 따라 달라질 수 있습니다.  <!-- AI가 수정함: 모델별 shape contract 안내 -->
+>
+> `PrepChainOrder`는 C# 런타임이 Python 전처리 순서를 재현하기 위한 우선 계약이고, `EstimatedFPS`는 진단/표시용 metadata입니다.  <!-- AI가 수정함: runtime contract 의미 보강 -->
+
+### model.json 필드 분류 (Field Classification)
+
+| 필드 | 카테고리 | 설명 |
+|------|----------|------|
+| `ModelType`, `OriginalType`, `IsMultiClass` | Runtime-Critical | 추론 타입 결정 |
+| `SelectedBands`, `RequiredRawBands` | Runtime-Critical | MROI 카메라 밴드 설정 |
+| `Weights`, `Bias` | Runtime-Critical | 선형 분류기 파라미터 |
+| `Preprocessing` | Runtime-Critical | 전처리 파라미터 |
+| `PrepChainOrder` | Runtime-Critical | 전처리 순서 계약 (C# 패리티 필수) |
+| `Labels`, `Colors` | Runtime-Critical | 클래스 → 레이블/색상 매핑 |
+| `EstimatedFPS`, `ModelName`, `Description`, `Timestamp`, `Performance` | Optional metadata | 진단/표시용 |
 
 ---
 
