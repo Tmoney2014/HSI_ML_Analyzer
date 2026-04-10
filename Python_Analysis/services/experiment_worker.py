@@ -1,5 +1,6 @@
 # AI가 수정함: ExperimentWorker — QThread 기반 실험 그리드 워커 (신규)
 from PyQt5.QtCore import QObject, pyqtSignal  # AI가 수정함: Qt 기반 시그널 지원
+import os  # AI가 수정함: 결과 경로/파일명 처리용
 import numpy as np  # AI가 수정함: 배열 연산용
 
 from services.data_loader import load_hsi_data  # AI가 수정함: ENVI 파일 로더
@@ -108,11 +109,9 @@ class ExperimentWorker(QObject):  # AI가 수정함: QObject 상속 (QThread 아
                 stop_flag=lambda: not self.is_running,   # AI가 수정함: 중단 조건 람다
             )
 
-            # AI가 수정함: Confusion Matrix PNG 저장 (플랜 line 91)
+            # AI가 수정함: Confusion Matrix PNG 저장 (성공 trial별 1개씩 저장)
             if results:  # AI가 수정함: 결과가 있을 때만 저장
                 try:
-                    import os as _os  # AI가 수정함: os 지연 import
-                    from datetime import datetime as _dt  # AI가 수정함: 타임스탬프용
                     import matplotlib  # AI가 수정함: backend 설정 필수 (백그라운드 스레드)
                     matplotlib.use('Agg')  # AI가 수정함: GUI 없는 환경용 backend
                     import matplotlib.pyplot as plt  # AI가 수정함: 플롯용
@@ -124,46 +123,47 @@ class ExperimentWorker(QObject):  # AI가 수정함: QObject 상속 (QThread 아
 
                     ok_results = [r for r in results if r.get('status') == 'ok']  # AI가 수정함: 성공 결과만
                     if ok_results:
-                        first_ok = ok_results[0]  # AI가 수정함: 첫 번째 성공 결과 기준
-                        bm_cm = first_ok['band_method']  # AI가 수정함: 밴드 방법
-                        mt_cm = first_ok['model_type']   # AI가 수정함: 모델 종류
-
                         X_prep_cm = _PS.apply_preprocessing_chain(  # AI가 수정함: 전처리 적용
                             self.cached_X.copy(), self.base_prep_chain
                         )
                         B_cm = X_prep_cm.shape[1]  # AI가 수정함: 전처리 후 밴드 수
-                        sel_idx_cm, _, _ = _sbb(  # AI가 수정함: 밴드 선택
-                            X_prep_cm.reshape(-1, 1, B_cm), self.n_bands,
-                            method=bm_cm, labels=self.cached_y,
-                        )
-                        X_sub_cm = X_prep_cm[:, sel_idx_cm]  # AI가 수정함: 선택된 밴드 슬라이싱
-                        model_cm, _ = _LS().train_model(  # AI가 수정함: 학습
-                            X_sub_cm, self.cached_y, model_type=mt_cm, test_ratio=self.test_ratio
-                        )
-                        try:  # AI가 수정함: stratify 실패 대비 fallback
-                            _, X_te, _, y_te = _tts(
-                                X_sub_cm, self.cached_y,
-                                test_size=self.test_ratio, random_state=42, stratify=self.cached_y
+                        _exp_dir_cm = os.path.join(self.output_dir, 'experiments')  # AI가 수정함: experiments 서브디렉토리
+                        os.makedirs(_exp_dir_cm, exist_ok=True)  # AI가 수정함: 디렉토리 보장
+                        for ok_row in ok_results:  # AI가 수정함: 성공 trial별 confusion matrix 저장
+                            bm_cm = ok_row['band_method']  # AI가 수정함: 밴드 방법
+                            mt_cm = ok_row['model_type']   # AI가 수정함: 모델 종류
+                            ts_cm = ok_row.get('timestamp', 'experiment')  # AI가 수정함: trial 타임스탬프 재사용
+                            safe_model_name = str(mt_cm).replace(' ', '_').replace('/', '_')  # AI가 수정함: 파일명 안전화
+                            sel_idx_cm, _, _ = _sbb(  # AI가 수정함: trial별 밴드 선택 재현
+                                X_prep_cm.reshape(-1, 1, B_cm), self.n_bands,
+                                method=bm_cm, labels=self.cached_y,
                             )
-                        except ValueError:  # AI가 수정함: 클래스 샘플 부족 fallback
-                            _, X_te, _, y_te = _tts(
-                                X_sub_cm, self.cached_y,
-                                test_size=self.test_ratio, random_state=42
+                            X_sub_cm = X_prep_cm[:, sel_idx_cm]  # AI가 수정함: 선택된 밴드 슬라이싱
+                            model_cm, _ = _LS().train_model(  # AI가 수정함: trial별 모델 재학습
+                                X_sub_cm, self.cached_y, model_type=mt_cm, test_ratio=self.test_ratio
                             )
-                        y_pred_cm = model_cm.predict(X_te)  # AI가 수정함: 예측
-                        cm_mat = confusion_matrix(y_te, y_pred_cm)  # AI가 수정함: confusion matrix 계산
+                            try:  # AI가 수정함: stratify 실패 대비 fallback
+                                _, X_te, _, y_te = _tts(
+                                    X_sub_cm, self.cached_y,
+                                    test_size=self.test_ratio, random_state=42, stratify=self.cached_y
+                                )
+                            except ValueError:  # AI가 수정함: 클래스 샘플 부족 fallback
+                                _, X_te, _, y_te = _tts(
+                                    X_sub_cm, self.cached_y,
+                                    test_size=self.test_ratio, random_state=42
+                                )
+                            y_pred_cm = model_cm.predict(X_te)  # AI가 수정함: 예측
+                            cm_mat = confusion_matrix(y_te, y_pred_cm)  # AI가 수정함: confusion matrix 계산
 
-                        fig_cm, ax_cm = plt.subplots(figsize=(6, 5))  # AI가 수정함: figure 생성
-                        ConfusionMatrixDisplay(confusion_matrix=cm_mat).plot(ax=ax_cm, colorbar=False)  # AI가 수정함: 플롯
-                        ax_cm.set_title(f"Confusion Matrix ({bm_cm} / {mt_cm})")  # AI가 수정함: 제목 설정
+                            fig_cm, ax_cm = plt.subplots(figsize=(6, 5))  # AI가 수정함: figure 생성
+                            ConfusionMatrixDisplay(confusion_matrix=cm_mat).plot(ax=ax_cm, colorbar=False)  # AI가 수정함: 플롯
+                            ax_cm.set_title(f"Confusion Matrix ({bm_cm} / {mt_cm})")  # AI가 수정함: 제목 설정
 
-                        _exp_dir_cm = _os.path.join(self.output_dir, 'experiments')  # AI가 수정함: experiments 서브디렉토리
-                        _os.makedirs(_exp_dir_cm, exist_ok=True)  # AI가 수정함: 디렉토리 보장
-                        cm_ts = _dt.now().strftime("%Y%m%d_%H%M%S")  # AI가 수정함: 타임스탬프
-                        cm_path = _os.path.join(_exp_dir_cm, f"{cm_ts}_confusion_matrix.png")  # AI가 수정함: PNG 경로
-                        fig_cm.savefig(cm_path, dpi=100, bbox_inches='tight')  # AI가 수정함: PNG 저장
-                        plt.close(fig_cm)  # AI가 수정함: figure 닫기 (메모리 해제)
-                        self.log_message.emit(f"Confusion matrix saved: {cm_path}")  # AI가 수정함: 저장 완료 로그
+                            cm_filename = f"{ts_cm}_{bm_cm}_{safe_model_name}_confusion_matrix.png"  # AI가 수정함: trial별 PNG 파일명
+                            cm_path = os.path.join(_exp_dir_cm, cm_filename)  # AI가 수정함: PNG 경로
+                            fig_cm.savefig(cm_path, dpi=100, bbox_inches='tight')  # AI가 수정함: PNG 저장
+                            plt.close(fig_cm)  # AI가 수정함: figure 닫기 (메모리 해제)
+                            self.log_message.emit(f"Confusion matrix saved: {cm_path}")  # AI가 수정함: 저장 완료 로그
                 except Exception as _cm_err:  # AI가 수정함: confusion matrix 저장 실패 → 비치명적 경고
                     self.log_message.emit(f"[Warning] Confusion matrix save failed: {_cm_err}")  # AI가 수정함: 경고
 

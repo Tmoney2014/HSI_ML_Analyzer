@@ -44,6 +44,8 @@ class TrainingViewModel(QObject):
         self.val_ratio = 0.20
         self.n_features = 5
         self.band_selection_method = "spa"  # AI가 수정함: 밴드 선택 방법 (기본값 SPA)
+        self.experiment_band_methods = ["spa"]  # AI가 수정함: Export Matrix용 다중 밴드 선택 기본값
+        self.experiment_model_types = ["Linear SVM"]  # AI가 수정함: Export Matrix용 다중 모델 기본값
         
         # Threading state
         self.worker_thread = None
@@ -89,6 +91,8 @@ class TrainingViewModel(QObject):
             "val_ratio": self.val_ratio,
             "n_features": self.n_features,
             "band_selection_method": self.band_selection_method,  # AI가 수정함: 밴드 선택 방법 저장
+            "experiment_band_methods": list(self.experiment_band_methods),  # AI가 수정함: Export Matrix 밴드 방법 목록 저장
+            "experiment_model_types": list(self.experiment_model_types),  # AI가 수정함: Export Matrix 모델 목록 저장
             # AI가 추가함: 제외 목록 저장 (list로 변환)
             "excluded_files": list(self.excluded_files)
         }
@@ -129,6 +133,19 @@ class TrainingViewModel(QObject):
         _known_methods = {'spa', 'full', 'anova_f', 'spa_lda_fast', 'spa_lda_greedy', 'lda_coef'}
         if self.band_selection_method not in _known_methods:  # AI가 수정함:
             self.band_selection_method = 'spa'  # AI가 수정함: unknown method → spa fallback
+        _raw_exp_band_methods = config.get("experiment_band_methods", [self.band_selection_method])  # AI가 수정함: 다중 밴드 방법 로드
+        if isinstance(_raw_exp_band_methods, str):  # AI가 수정함: 구버전/수동 편집 호환
+            _raw_exp_band_methods = [_raw_exp_band_methods]  # AI가 수정함: 문자열 → 단일 리스트 정규화
+        self.experiment_band_methods = [m for m in _raw_exp_band_methods if m in _known_methods]  # AI가 수정함: 허용된 밴드 방법만 유지
+        if not self.experiment_band_methods:  # AI가 수정함: 비어 있으면 현재 단일 선택으로 fallback
+            self.experiment_band_methods = [self.band_selection_method]  # AI가 수정함: 최소 1개 보장
+        _known_model_types = {"Linear SVM", "PLS-DA", "LDA", "Ridge Classifier", "Logistic Regression"}  # AI가 수정함: Export Matrix 허용 모델 목록
+        _raw_exp_model_types = config.get("experiment_model_types", [self.model_type])  # AI가 수정함: 다중 모델 로드
+        if isinstance(_raw_exp_model_types, str):  # AI가 수정함: 구버전/수동 편집 호환
+            _raw_exp_model_types = [_raw_exp_model_types]  # AI가 수정함: 문자열 → 단일 리스트 정규화
+        self.experiment_model_types = [m for m in _raw_exp_model_types if m in _known_model_types]  # AI가 수정함: 허용된 모델만 유지
+        if not self.experiment_model_types:  # AI가 수정함: 비어 있으면 현재 단일 모델로 fallback
+            self.experiment_model_types = [self.model_type]  # AI가 수정함: 최소 1개 보장
             
         # AI가 추가함: 제외 목록 복원
         if "excluded_files" in config:
@@ -484,6 +501,8 @@ class TrainingViewModel(QObject):
     def run_experiment_grid(self, band_methods: list, model_types: list):  # AI가 수정함: 실험 그리드 실행
         """Async Experiment Grid Entry Point."""
         if not self._safe_cleanup_exp_thread(): return
+        self.experiment_band_methods = list(band_methods)  # AI가 수정함: Export Matrix 선택 상태 동기화
+        self.experiment_model_types = list(model_types)  # AI가 수정함: Export Matrix 선택 상태 동기화
         self._ensure_ref_loaded()
         vm_state = self._create_vm_state_snapshot()
         params = {

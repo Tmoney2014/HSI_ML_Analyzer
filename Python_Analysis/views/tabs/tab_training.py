@@ -1,12 +1,28 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QProgressBar, 
                              QTextEdit, QLabel, QGroupBox, QHBoxLayout, QLineEdit,
                              QComboBox, QDoubleSpinBox, QSpinBox, QFileDialog, QSplitter,
-                             QTreeWidget, QTreeWidgetItem)
+                             QTreeWidget, QTreeWidgetItem, QListWidget, QListWidgetItem)
 from PyQt5.QtCore import Qt, pyqtSignal
 from viewmodels.training_vm import TrainingViewModel
 import os
 
 class TabTraining(QWidget):
+    _EXPERIMENT_BAND_METHOD_OPTIONS = [  # AI가 수정함: Export Matrix용 밴드 선택 옵션
+        ("SPA", "spa"),
+        ("ANOVA-F", "anova_f"),
+        ("SPA-LDA Fast", "spa_lda_fast"),
+        ("SPA-LDA Greedy", "spa_lda_greedy"),
+        ("LDA-coef", "lda_coef"),
+        ("Full Band", "full"),
+    ]
+    _EXPERIMENT_MODEL_OPTIONS = [  # AI가 수정함: Export Matrix용 모델 옵션
+        "LDA",
+        "Linear SVM",
+        "PLS-DA",
+        "Ridge Classifier",
+        "Logistic Regression",
+    ]
+
     def __init__(self, training_vm: TrainingViewModel):
         super().__init__()
         self.vm = training_vm
@@ -94,6 +110,43 @@ class TabTraining(QWidget):
         self.combo_band_method.setToolTip("SPA: Successive Projections (orthogonal), Full Band: Use all valid bands (no selection)")  # AI가 수정함: 툴팁 업데이트
         hbox_band_method.addWidget(self.combo_band_method)
         vbox.addLayout(hbox_band_method)
+
+        grp_experiment = QGroupBox("Experiment Matrix Selection")  # AI가 수정함: Export Matrix 전용 다중 선택 UI
+        exp_vbox = QVBoxLayout()  # AI가 수정함: Experiment Matrix 그룹 레이아웃
+        exp_vbox.setSpacing(4)  # AI가 수정함: 그룹 내부 간격 축소
+        exp_vbox.addWidget(QLabel("Choose multiple band methods and models for paper-style matrix export."))  # AI가 수정함: 설명 라벨
+
+        exp_hbox = QHBoxLayout()  # AI가 수정함: 두 개의 리스트를 나란히 배치
+
+        exp_band_vbox = QVBoxLayout()  # AI가 수정함: 밴드 방법 리스트 컬럼
+        exp_band_vbox.addWidget(QLabel("Band Methods:"))  # AI가 수정함:
+        self.list_experiment_band_methods = QListWidget()  # AI가 수정함: Export Matrix 밴드 방법 체크 리스트
+        self.list_experiment_band_methods.setToolTip("Checked methods will be combined with checked models during Export Matrix.")  # AI가 수정함:
+        for display_name, method_key in self._EXPERIMENT_BAND_METHOD_OPTIONS:  # AI가 수정함: 체크 가능한 항목 생성
+            item = QListWidgetItem(display_name)  # AI가 수정함: 표시 이름
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)  # AI가 수정함: 체크 가능 항목
+            item.setData(Qt.UserRole, method_key)  # AI가 수정함: canonical method key 저장
+            item.setCheckState(Qt.Unchecked)  # AI가 수정함: init_from_vm_state에서 선택 복원
+            self.list_experiment_band_methods.addItem(item)  # AI가 수정함: 리스트에 추가
+        exp_band_vbox.addWidget(self.list_experiment_band_methods)  # AI가 수정함:
+        exp_hbox.addLayout(exp_band_vbox)  # AI가 수정함:
+
+        exp_model_vbox = QVBoxLayout()  # AI가 수정함: 모델 리스트 컬럼
+        exp_model_vbox.addWidget(QLabel("Models:"))  # AI가 수정함:
+        self.list_experiment_models = QListWidget()  # AI가 수정함: Export Matrix 모델 체크 리스트
+        self.list_experiment_models.setToolTip("Checked models will be paired with each checked band method during Export Matrix.")  # AI가 수정함:
+        for model_name in self._EXPERIMENT_MODEL_OPTIONS:  # AI가 수정함: 체크 가능한 모델 항목 생성
+            item = QListWidgetItem(model_name)  # AI가 수정함: 표시 이름 == canonical model name
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)  # AI가 수정함: 체크 가능 항목
+            item.setData(Qt.UserRole, model_name)  # AI가 수정함: canonical model name 저장
+            item.setCheckState(Qt.Unchecked)  # AI가 수정함: init_from_vm_state에서 선택 복원
+            self.list_experiment_models.addItem(item)  # AI가 수정함: 리스트에 추가
+        exp_model_vbox.addWidget(self.list_experiment_models)  # AI가 수정함:
+        exp_hbox.addLayout(exp_model_vbox)  # AI가 수정함:
+
+        exp_vbox.addLayout(exp_hbox)  # AI가 수정함: 좌우 리스트 레이아웃 추가
+        grp_experiment.setLayout(exp_vbox)  # AI가 수정함: 그룹 박스 레이아웃 설정
+        vbox.addWidget(grp_experiment)  # AI가 수정함: Training Configuration 그룹에 포함
         
         grp_idx.setLayout(vbox)
         
@@ -193,6 +246,8 @@ class TabTraining(QWidget):
         self.combo_model.setEnabled(enabled)
         self.spin_ratio.setEnabled(enabled)
         self.combo_band_method.setEnabled(enabled)  # AI가 수정함: 훈련 중 비활성화
+        self.list_experiment_band_methods.setEnabled(enabled)  # AI가 수정함: Export Matrix 밴드 리스트 비활성화 포함
+        self.list_experiment_models.setEnabled(enabled)  # AI가 수정함: Export Matrix 모델 리스트 비활성화 포함
         # AI가 수정함: Full Band 모드에서는 훈련 완료 후에도 spin_bands 비활성화 유지
         if enabled:  # AI가 수정함:
             self.spin_bands.setEnabled(self.vm.band_selection_method != "full")
@@ -237,6 +292,8 @@ class TabTraining(QWidget):
             _method_display = {"spa": "SPA", "full": "Full Band", "anova_f": "ANOVA-F", "spa_lda_fast": "SPA-LDA Fast", "spa_lda_greedy": "SPA-LDA Greedy", "lda_coef": "LDA-coef"}  # AI가 수정함: supervised 방법 4개 추가
             idx = self.combo_band_method.findText(_method_display.get(self.vm.band_selection_method, "SPA"))
             if idx >= 0: self.combo_band_method.setCurrentIndex(idx)
+            self._restore_checked_items(self.list_experiment_band_methods, self.vm.experiment_band_methods)  # AI가 수정함: Export Matrix 밴드 선택 복원
+            self._restore_checked_items(self.list_experiment_models, self.vm.experiment_model_types)  # AI가 수정함: Export Matrix 모델 선택 복원
         finally:
             self.blockSignals(False)
         
@@ -324,6 +381,31 @@ class TabTraining(QWidget):
         self.spin_ratio.valueChanged.connect(self._on_ui_changed)
         self.spin_bands.valueChanged.connect(self._on_ui_changed)
         self.combo_band_method.currentIndexChanged.connect(self._on_ui_changed)  # AI가 수정함
+        self.list_experiment_band_methods.itemChanged.connect(self._on_experiment_selection_changed)  # AI가 수정함: Export Matrix 밴드 체크 변경
+        self.list_experiment_models.itemChanged.connect(self._on_experiment_selection_changed)  # AI가 수정함: Export Matrix 모델 체크 변경
+
+    def _restore_checked_items(self, list_widget, selected_values):  # AI가 수정함: 체크 리스트 선택 복원 헬퍼
+        selected_set = set(selected_values or [])  # AI가 수정함: membership lookup 최적화
+        list_widget.blockSignals(True)  # AI가 수정함: 복원 중 itemChanged 루프 방지
+        try:
+            for index in range(list_widget.count()):  # AI가 수정함: 전체 항목 순회
+                item = list_widget.item(index)  # AI가 수정함:
+                item.setCheckState(Qt.Checked if item.data(Qt.UserRole) in selected_set else Qt.Unchecked)  # AI가 수정함: 저장된 선택값 반영
+        finally:
+            list_widget.blockSignals(False)  # AI가 수정함:
+
+    def _get_checked_values(self, list_widget):  # AI가 수정함: 체크된 canonical 값 목록 수집
+        values = []  # AI가 수정함: 반환 리스트 초기화
+        for index in range(list_widget.count()):  # AI가 수정함: 전체 항목 순회
+            item = list_widget.item(index)  # AI가 수정함:
+            if item.checkState() == Qt.Checked:  # AI가 수정함: 체크된 항목만 수집
+                values.append(item.data(Qt.UserRole))  # AI가 수정함: canonical 값 사용
+        return values  # AI가 수정함: 선택값 반환
+
+    def _on_experiment_selection_changed(self, _item):  # AI가 수정함: Export Matrix 체크 상태를 VM에 저장
+        self.vm.experiment_band_methods = self._get_checked_values(self.list_experiment_band_methods)  # AI가 수정함: 밴드 선택 동기화
+        self.vm.experiment_model_types = self._get_checked_values(self.list_experiment_models)  # AI가 수정함: 모델 선택 동기화
+        self.vm.config_changed.emit()  # AI가 수정함: 프로젝트 저장 반영
 
     def append_log(self, msg):
         self.log_text.append(msg)
@@ -352,17 +434,21 @@ class TabTraining(QWidget):
 
     def on_export_click(self):  # AI가 수정함: Export Matrix 버튼 핸들러
         """현재 UI 체크박스 기준으로 모든 활성 band_method × model 조합 실험 그리드 실행"""
-        # 1. 현재 VM에서 선택된 band_methods, model_types 수집
-        band_methods = [self.vm.band_selection_method]  # 현재 선택된 1개
-        model_types = [self.vm.model_type]              # 현재 선택된 1개
-        # TODO: 향후 다중 선택 체크박스 UI로 확장 가능
+        band_methods = self._get_checked_values(self.list_experiment_band_methods)  # AI가 수정함: 체크된 밴드 방법 전체 수집
+        model_types = self._get_checked_values(self.list_experiment_models)  # AI가 수정함: 체크된 모델 전체 수집
+        if not band_methods:  # AI가 수정함: 최소 1개 밴드 방법 필수
+            self.append_log("⚠️ Select at least one band method for Export Matrix.")
+            return
+        if not model_types:  # AI가 수정함: 최소 1개 모델 필수
+            self.append_log("⚠️ Select at least one model for Export Matrix.")
+            return
         self.log_text.clear()
         self.set_buttons_enabled(False)
         self.vm.run_experiment_grid(band_methods, model_types)
 
     def on_open_folder_click(self):  # AI가 수정함: 실험 폴더 열기
         import os, subprocess
-        folder = self.vm.output_folder
+        folder = os.path.join(self.vm.output_folder, "experiments")  # AI가 수정함: 실제 실험 결과 서브폴더 열기
         if os.path.exists(folder):
             subprocess.Popen(f'explorer "{folder}"')  # AI가 수정함: Windows 탐색기 열기
         else:
