@@ -13,7 +13,7 @@ HyperSort offline trainer (Python/PyQt5, MVVM). Produces `model.json` consumed b
 ```
 HSI_ML_Analyzer/
 ├── AGENTS.md                # Global rules + directory index (this file)
-├── docs/                    # Pipeline/runtime/cache design specs
+├── docs/                    # Pipeline/runtime/cache design specs + handoff briefs
 ├── Python_Analysis/         # Main app (entry, MVVM, services, UI)
 ├── requirements.txt         # Python dependencies
 ├── HSI_Analyzer.spec        # PyInstaller packaging spec
@@ -47,6 +47,9 @@ HSI_ML_Analyzer/
 | Preprocessing pipeline | `services/processing_service.py` | Single source for mask+convert+prep |
 | Model train/export | `services/learning_service.py` | Train estimator + write `model.json` |
 | Runtime invariants | `docs/data_pipeline_spec.md` | Raw masking, lazy processing, parity |
+| Runtime contract spec | `docs/inference_runtime_spec.md` | Authoritative `model.json` runtime contract |
+| Python contract hardening handoff | `docs/python_runtime_contract_hardening_brief_2026-04-10.md` | Python exporter/doc/test follow-up after recent export changes |
+| C# runtime follow-up handoff | `docs/csharp_runtime_followup_after_python_hardening_2026-04-10.md` | FlashHSI file-by-file follow-up using stabilized Python contract |
 | Cache invariants | `docs/cache_hierarchy_spec_ko.md` | L1/L2 ownership and invalidation |
 
 ## CONVENTIONS (GLOBAL)

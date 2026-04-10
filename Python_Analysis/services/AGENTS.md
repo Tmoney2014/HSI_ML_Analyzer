@@ -57,7 +57,11 @@ train_model(X, y, model_type="Linear SVM", test_ratio=0.2, log_callback=None)
 
 **`export_model` key behaviors:**
 - Computes `RequiredRawBands` by expanding `SelectedBands` with gap-adjacent bands needed at runtime (derivative gap/order + SG window radius)
+- Sorts/deduplicates `SelectedBands` before export and reorders weight columns to match the exported feature order  <!-- AI가 수정함: band-order contract 보강 -->
 - PLS-DA: `_train_pls` monkey-patches `model.export_coef_` and `model.export_intercept_` to normalize shapes before export — this is load-bearing, do not remove
+- Preserves model-specific `Weights` / `Bias` shapes; downstream runtime must interpret them using `OriginalType` + `IsMultiClass` rather than assuming one universal tensor layout  <!-- AI가 수정함: model-aware shape contract 보강 -->
+- Emits `PrepChainOrder` as the authoritative preprocessing replay order for runtime parity; documented fallback order is only for legacy/no-field cases  <!-- AI가 수정함: preprocessing order contract 보강 -->
+- Exports `EstimatedFPS` as diagnostic metadata only; it must not be treated as a runtime-correctness input  <!-- AI가 수정함: metadata 성격 명시 -->
 - All band indices in model.json are **0-based**
 
 ### `optimization_service.py` — `OptimizationService(QObject)`

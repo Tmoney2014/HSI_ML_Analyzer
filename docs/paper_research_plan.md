@@ -275,6 +275,11 @@ LDA-coef           ???    ???    ???      ???     ???
 Full Band          ???    ???    ???      ???     ???
 ```
 
+**구현 메모 (2026-04-10):**
+- 현재 HSI_ML_Analyzer에는 `ExperimentRunner` / `ExperimentWorker` 기반의 experiment grid 실행 인프라가 구현되어 있다.  <!-- AI가 수정함: 실제 구현 상태 반영 -->
+- Training 탭의 **Export Matrix** UI는 다중 선택 band methods × 다중 선택 model types 조합을 실행하여 aggregate CSV, per-trial CSV, per-trial confusion matrix PNG를 저장한다.  <!-- AI가 수정함: 다중 선택 UI 반영 -->
+- 현재 자동화 평가는 train/test split 기반이며, 논문 최종 제출용 5-fold cross validation 및 통계 정리는 후속 실험 정리 단계에서 확정한다.  <!-- AI가 수정함: 현재 구현과 논문 최종 프로토콜 구분 -->
+
 ---
 
 ### 4.4 Phase 4: 전처리 파이프라인 비교
@@ -416,7 +421,8 @@ References
 | 기능 | 우선순위 | 비고 |
 |------|----------|------|
 | QDA (비교용) | 🟡 Low | 런타임 미사용, 실험용 |
-| 밴드선택 × 모델 자동 그리드 실험 | 🔴 High | 논문 Table 자동 생성 |
+| 밴드선택 × 모델 자동 그리드 실험 인프라 | ✅ 완료 | `ExperimentRunner`, `ExperimentWorker`, multi-select Export Matrix UI, CSV/Confusion Matrix export 구현 완료 | <!-- AI가 수정함: 실제 구현 상태 반영 -->
+| 논문용 5-fold CV 및 최종 통계 테이블 정리 | 🔴 High | 현재 자동화는 train/test split 기반, 논문용 통계 정리 후속 필요 | <!-- AI가 수정함: 남은 연구 작업 재정의 -->
 | FPS 실측 로깅 도구 | 🔴 High | Phase 1 필수 |
 
 ---
