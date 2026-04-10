@@ -325,6 +325,11 @@ class LearningService:
         Export model to JSON for C#.
         Handles SVM, PLS-DA, and LDA (Linear Only).
         Metrics: Optional performance dict from train_model
+
+        Runtime contract note:
+        - Python exporter preserves model-specific `Weights` / `Bias` shapes.  # AI가 수정함: shape policy 명시
+        - C# runtime must interpret them using `OriginalType` + `IsMultiClass`.  # AI가 수정함: model-aware parser 계약 명시
+        - Do not force all models into one universal tensor shape here unless the runtime spec/docs/tests are updated together.  # AI가 수정함: 계약 드리프트 방지
         """
         model_type_name = type(model).__name__
         
@@ -347,6 +352,10 @@ class LearningService:
             total_bands = len(mean_spectrum)
 
         # 1. Extract Weights based on Model Type
+        # AI가 수정함: exporter는 model-specific shape를 유지하고, runtime은 OriginalType/IsMultiClass로 해석합니다.
+        # - multiclass linear models: Weights=[Class][Feature], Bias=[Class]
+        # - binary linear models: Weights=[Feature], Bias=float
+        # - PLS-DA export는 export_coef_/export_intercept_를 사용해 class-major orientation을 보장합니다.
         if isinstance(model, (LinearSVC, LinearDiscriminantAnalysis, RidgeClassifier, LogisticRegression)):  # AI가 수정함: Ridge, LogReg 추가 — isinstance 체인 확장
             # Both LinearSVC and LDA share similar coef_ structure
             if model.coef_.ndim > 1 and model.coef_.shape[0] > 1:
@@ -356,6 +365,12 @@ class LearningService:
                 if original_bands != selected_bands:
                     band_to_col = {int(b): i for i, b in enumerate(original_bands)}
                     col_order = [band_to_col[b] for b in selected_bands if b in band_to_col]
+                    if len(col_order) != len(selected_bands):  # AI가 추가함: weight column reorder mismatch guard
+                        raise ValueError(
+                            f"export_model: weight column reorder mismatch — "
+                            f"col_order len={len(col_order)} != selected_bands len={len(selected_bands)}. "
+                            f"Ensure original_bands covers all values in selected_bands before dedup."
+                        )
                     raw_weights = raw_weights[:, col_order]
                 weights = raw_weights.tolist()
                 bias = model.intercept_.tolist()
@@ -381,6 +396,12 @@ class LearningService:
                 if original_bands != selected_bands:
                     band_to_col = {int(b): i for i, b in enumerate(original_bands)}
                     col_order = [band_to_col[b] for b in selected_bands if b in band_to_col]
+                    if len(col_order) != len(selected_bands):  # AI가 추가함: weight column reorder mismatch guard (binary)
+                        raise ValueError(
+                            f"export_model: weight column reorder mismatch (binary) — "
+                            f"col_order len={len(col_order)} != selected_bands len={len(selected_bands)}. "
+                            f"Ensure original_bands covers all values in selected_bands before dedup."
+                        )
                     raw_coef = raw_coef[col_order]
                 weights = raw_coef.tolist()
                 
@@ -507,11 +528,9 @@ class LearningService:
         if total_bands is not None and total_bands > 0:
             required_raw_bands_sorted = [b for b in required_raw_bands_sorted if 0 <= b < total_bands]
         else:
-            import warnings
-            warnings.warn(
-                "export_model: total_bands를 결정할 수 없어 RequiredRawBands 상한 검사를 건너뜁니다. "
-                "범위 초과 밴드 인덱스가 포함될 수 있습니다.",
-                RuntimeWarning
+            raise ValueError(  # AI가 수정함: total_bands=None fail-fast — C# 런타임 범위 초과 방지
+                "export_model: total_bands는 필수입니다. "
+                "RequiredRawBands 상한 클램프를 위해 HSI 센서의 전체 밴드 수를 전달하세요."
             )
         
         # AI가 추가함: export 직전 weights/bias 형태 검증 — [L-2]
