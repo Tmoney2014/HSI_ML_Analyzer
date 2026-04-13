@@ -37,6 +37,7 @@ class TrainingWorker(QObject):
         self.params = params 
         # AI가 수정함: precomputed_data 제거, base_data_cache만 사용
         self.base_data_cache = params.get('base_data_cache')  # (X_base, y) - NO Preprocessing
+        self.raw_band_count = int(params.get('raw_band_count', 0) or 0)  # AI가 추가함: authoritative RAW sensor band count
         self.is_running = True
         
         # AI가 수정함: 색상 맵 저장
@@ -81,40 +82,32 @@ class TrainingWorker(QObject):
             # 3. Band Selection
             if not silent: self.log_message.emit(f"Selecting best {n_features} bands via {band_method.upper()}...")  # AI가 수정함: 동적 method 표시
             
-            # Parse Exclude Bands
-            exclude_indices = []
+            # AI가 수정함: authoritative RAW band count required for export/runtime parity
+            n_bands = X.shape[1]
+            if self.raw_band_count <= 0:
+                raise ValueError(
+                    "TrainingWorker: raw_band_count is required. "
+                    "Use the loaded RAW cube band count, not processed feature count."
+                )
+
+            # Parse RAW-band exclusions and map to processed feature indices
+            raw_exclude_indices = []
             if self.exclude_bands_str:
                 try:
-                    for part in self.exclude_bands_str.split(','):
-                        if '-' in part:
-                            start, end = map(int, part.split('-'))
-                            # UI is usually 1-based, Python is 0-based.
-                            # User input: 1-40 -> Indices 0..39
-                            exclude_indices.extend(range(start - 1, end))
-                        else:
-                            exclude_indices.append(int(part) - 1)
-                except:
-                    if not silent: self.log_message.emit("Warning: Failed to parse exclude bands string.")
-            
-            # AI가 수정함: total_bands(원본 밴드 수) 선계산 — _raw_n_bands 참조 순서 오류 방지
-            # prep_chain 내 모든 SimpleDeriv step 누적으로 processed -> raw 밴드 수 역산
-            n_bands = X.shape[1]
-            _raw_n_bands = n_bands
-            for _step in self.prep_chain:
-                if _step.get('name') == 'SimpleDeriv':
-                    _g = _step.get('params', {}).get('gap', 1)
-                    _o = _step.get('params', {}).get('order', 1)
-                    _raw_n_bands += _g * _o
+                    raw_exclude_indices = ProcessingService.parse_raw_band_indices(self.exclude_bands_str)
+                except ValueError as ex:
+                    raise ValueError(f"Exclude band parse error: {ex}")
 
-            # AI가 수정함: exclude_bands 인덱스 공간 불일치 경고 — S-1
-            # UI 입력: Raw 밴드 번호 (1-based). X는 이미 prep_chain 적용 후 processed 공간.
-            # SimpleDeriv 적용 시 processed 밴드 수 < Raw 밴드 수 → 범위 초과 인덱스 자동 제외됨.
-            if _raw_n_bands != n_bands and exclude_indices and not silent:
-                self.log_message.emit(
-                    f"⚠️ [Band Exclusion] UI 입력 밴드 번호는 Raw 공간(1~{_raw_n_bands}) 기준이나, "
-                    f"현재 처리 공간은 {n_bands}밴드입니다. 범위 초과 인덱스는 자동 제외됩니다."
-                )
+            exclude_indices = ProcessingService.map_raw_excludes_to_processed_indices(
+                raw_exclude_indices, self.raw_band_count, self.prep_chain
+            )
             exclude_indices = [i for i in exclude_indices if 0 <= i < n_bands]
+
+            if raw_exclude_indices and not silent:
+                self.log_message.emit(
+                    f"[Band Exclusion] Raw indices {len(raw_exclude_indices)}개 → "
+                    f"processed feature {len(exclude_indices)}개 제외"
+                )
 
             # AI가 추가함: Gap/SG 기반 SPA 상한 자동 제외
             # SimpleDeriv 사용 시: 전처리 후 자연히 상한 제한됨. SG radius만 추가 제약.
@@ -132,7 +125,7 @@ class TrainingWorker(QObject):
                     if not silent:
                         self.log_message.emit(f"   [Band Limit] SPA 상한 제약: 밴드 {_upper_limit}~{n_bands-1} 자동 제외 (offset={_upper_offset})")
 
-            # total_bands: RequiredRawBands 클램프용 원본 밴드 수 계산값(_raw_n_bands) 재사용
+            # total_bands: authoritative RAW sensor band count (export/runtime parity)
             
             # SPA Downsampling (Optimization for Selection ONLY)
             # Use max 3000 samples for SPA speed, but train on FULL data
@@ -207,7 +200,7 @@ class TrainingWorker(QObject):
                 # AI가 추가함: Metadata
                 model_name=model_name,
                 description=model_desc,
-                total_bands=_raw_n_bands,  # AI가 추가함: RequiredRawBands 클램프용
+                total_bands=self.raw_band_count,  # AI가 수정함: authoritative RAW band count 전달
             )
             
             self.log_message.emit(f"Model exported to {output_path}")

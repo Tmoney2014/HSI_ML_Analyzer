@@ -1,23 +1,18 @@
 """
 Tests for RequiredRawBands computation in export_model().
 
-Algorithm:
-  base_bands = set()
-  for b in selected_bands:
-      base_bands.add(b)
-      if ApplyDeriv (gap=g, order=o):
-          for k=1..o: base_bands.add(b + k*g)
+Algorithm (current contract):
+  selected_bands are indices in the PROCESSED feature space used to train the model.
+  export_model() maps each processed feature index back to the set of RAW sensor
+  bands required to reproduce that feature after preprocessing.
 
-  required_raw_bands = set()
-  for base in base_bands:
-      required_raw_bands.add(base)
-      if ApplySG (sg_radius = SGWin // 2):
-          for offset=1..sg_radius:
-              required_raw_bands.add(max(0, base - offset))
-              required_raw_bands.add(base + offset)
-
-  required_raw_bands_sorted = sorted(b for b in required_raw_bands if b < total_bands)
-  if total_bands is None: raise ValueError
+  This matters when preprocessing changes positional mapping (e.g. SimpleDeriv).
+  Example:
+    total_bands=10, SimpleDeriv(gap=5, order=1), SG(win=3,radius=1)
+    processed feature count = 5
+    processed index 4 depends on raw features at pre-SG positions 4 and 9,
+    which expand to raw neighbourhoods {3,4,5} and {8,9} after clamping.
+    => RequiredRawBands = [3,4,5,8,9]
 """
 import json
 import sys
@@ -160,39 +155,66 @@ def test_deriv_and_sg_combined(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_clamp_to_total_bands(tmp_path):
-    """total_bands=10: bands ≥ 10 are excluded.
-    config: Deriv(gap=5,order=1) + SG(win=3 → radius=1), selected=[5].
-    base_bands={5,10}. Expand r=1: {4,5,6} ∪ {9,10,11}.
-    With total_bands=10: keep only b < 10 → [4,5,6,9].
+    """total_bands=10: processed index 4 is the last valid feature.
+    config: Deriv(gap=5,order=1) + SG(win=3 → radius=1), selected_processed=[4].
+    Dependencies follow the actual chain order:
+      SG first, then Deriv.
+      processed 4 <- derivative over SG-expanded supports at positions 4 and 9
+      => SG(4)={3,4,5}, SG(9)={8,9} after clamp to total_bands=10
+      => union [3,4,8,9]
     """
     config = [
         {"name": "SimpleDeriv", "params": {"gap": 5, "order": 1}},
         {"name": "SG", "params": {"win": 3, "poly": 2, "deriv": 0}},
     ]
     data = call_export(
-        selected_bands=[5],
+        selected_bands=[4],
         preprocessing_config=config,
         tmp_path=tmp_path,
         total_bands=10,
     )
-    assert data["RequiredRawBands"] == [4, 5, 6, 9]
+    assert data["RequiredRawBands"] == [3, 4, 8, 9]
     # Verify all are strictly less than total_bands
     assert all(b < 10 for b in data["RequiredRawBands"])
 
 
 def test_clamp_to_total_bands_all_pass(tmp_path):
-    """Same config but total_bands=12: all bands {4,5,6,9,10,11} pass."""
+    """Same config but total_bands=12: full chain-order dependency survives.
+    SG first then Deriv on processed index 4 => {3,4,5} ∪ {8,9,10}
+    => [3,4,5,8,9,10]
+    """
     config = [
         {"name": "SimpleDeriv", "params": {"gap": 5, "order": 1}},
         {"name": "SG", "params": {"win": 3, "poly": 2, "deriv": 0}},
     ]
     data = call_export(
-        selected_bands=[5],
+        selected_bands=[4],
         preprocessing_config=config,
         tmp_path=tmp_path,
         total_bands=12,
     )
-    assert data["RequiredRawBands"] == [4, 5, 6, 9, 10, 11]
+    assert data["RequiredRawBands"] == [3, 4, 5, 8, 9, 10]
+
+
+def test_processed_index_mapping_with_deriv_and_sg(tmp_path):
+    """Processed feature index must map back to RAW dependencies, not be treated as RAW directly.
+
+    total_bands=20, config: SG(win=5 → radius=2) then Deriv(gap=5,order=1)
+    processed index 0 depends on SG-expanded raw supports at positions 0 and 5
+      - SG(0)={0,1,2}
+      - SG(5)={3,4,5,6,7}
+    """
+    config = [
+        {"name": "SimpleDeriv", "params": {"gap": 5, "order": 1}},
+        {"name": "SG", "params": {"win": 5, "poly": 2, "deriv": 0}},
+    ]
+    data = call_export(
+        selected_bands=[0],
+        preprocessing_config=config,
+        tmp_path=tmp_path,
+        total_bands=20,
+    )
+    assert data["RequiredRawBands"] == [0, 1, 2, 5, 6, 7]
 
 
 # ---------------------------------------------------------------------------

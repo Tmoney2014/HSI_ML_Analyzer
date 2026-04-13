@@ -9,6 +9,7 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.linear_model import RidgeClassifier, LogisticRegression  # AI가 수정함: Ridge, LogReg 추가
 
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from services.processing_service import ProcessingService  # AI가 추가함: processed→raw dependency mapping for export
 try:  # AI가 수정함: matplotlib 미설치 환경에서도 학습/내보내기 동작 보장
     import matplotlib.pyplot as plt  # AI가 수정함: 플롯 생성용 선택 import
 except ImportError:  # AI가 수정함: matplotlib 없을 때 fallback 처리
@@ -465,61 +466,12 @@ class LearningService:
                 elif name == "MinSub": prep_flat["ApplyMinSub"] = True  # AI가 추가함: MinSub export
                 # Absorbance is handled by Mode
 
-        # AI가 수정함: RequiredRawBands 계산 로직 개선 (Deriv Order & SG Window 고려)
-        # Logic:
-        # 1. Deriv(미분)가 있다면, 차수(Order)만큼 Base Band가 늘어남. (e.g. Band, Band+Gap, Band+2*Gap...)
-        # 2. SG(골레이)가 있다면, 각 Base Band를 중심으로 Window Size만큼 주변 밴드가 필요함.
-        # 3. 이 두 가지를 순차적으로 적용하여 최종 필요 밴드 집합을 구함.
-        
-        required_raw_bands = set()
-        
-        # Parameters (Strict Mode Validation)
-        is_deriv = prep_flat.get("ApplyDeriv", False)
-        
-        # 1. Check Deriv Gap (SimpleDeriv 사용 시에만 gap 밴드 필요 — Absorbance 단독은 C#이 gap 접근 안 함)
-        # AI가 수정함: is_absorbance 분기 제거 — SimpleDeriv 없이 Absorbance만 쓰면 gap 불필요
-        deriv_gap = 5 # Default
-        if is_deriv:
-            if "Gap" not in prep_flat:
-                 # 만약 UI가 Gap을 안 줬다면 에러
-                 raise ValueError("Export Error: 'Gap' parameter is missing for Derivative!")
-            deriv_gap = prep_flat["Gap"]
-        
-        deriv_order = prep_flat.get("DerivOrder", 1)
-        
-        is_sg = prep_flat.get("ApplySG", False)
-        if is_sg and "SGWin" not in prep_flat:
-             # SG 사용 시 Win 필수
-             raise ValueError("Export Error: 'SGWin' parameter is missing for Savitzky-Golay!")
-             
-        sg_win = prep_flat.get("SGWin", 5)
-        sg_radius = sg_win // 2 if is_sg else 0
-        
-        # Step 1: Core Base Bands (Deriv 또는 Absorbance gap 고려)
-        # 만약 Deriv/Absorbance 미사용이면 base_bands = selected_bands
-        base_bands = set()
-        for b in selected_bands:
-            base_idx = int(b)
-            base_bands.add(base_idx)
-            
-            if is_deriv and deriv_gap > 0:
-                # 1차 미분 -> b, b+Gap 필요
-                # 2차 미분 -> b, b+Gap, b+2*Gap 필요 ...
-                for k in range(1, deriv_order + 1):
-                    base_bands.add(base_idx + (k * deriv_gap))
-        
-        # Step 2: Expand by SG Window (SG 고려)
-        # 모든 Base Band에 대해 Radius 만큼 좌우로 확장
-        for base in base_bands:
-            required_raw_bands.add(base) # 자기 자신
-            if sg_radius > 0:
-                for offset in range(1, sg_radius + 1):
-                    # AI가 수정함: 음수 인덱스 방지 (max(0, base - offset))
-                    left_idx = max(0, base - offset)
-                    required_raw_bands.add(left_idx)
-                    required_raw_bands.add(base + offset)
-        
-        required_raw_bands_sorted = sorted(list(required_raw_bands))
+        # AI가 수정함: RequiredRawBands는 processed feature indices(selected_bands)로부터
+        # authoritative raw dependency mapping을 통해 계산해야 함.
+        # selected_bands는 학습된 feature-space 인덱스이고, runtime은 RAW sensor band를 필요로 한다.
+        required_raw_bands_sorted = ProcessingService.map_processed_indices_to_raw_dependencies(
+            selected_bands, total_bands if total_bands is not None else 0, preprocessing_config or []
+        )
         estimated_fps = _HSI_CAMERA_BANDWIDTH_BPS / (  # AI가 수정함: FPS 추정 계산
             max(len(required_raw_bands_sorted), 1) * _HSI_PIXEL_BYTES * _HSI_FRAME_WIDTH  # AI가 수정함: FPS 추정 계산
         )  # AI가 수정함: FPS 추정 계산

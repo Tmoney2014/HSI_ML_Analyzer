@@ -149,6 +149,149 @@ class ProcessingService:
         return params[key]
 
     @staticmethod
+    def parse_raw_band_indices(exclude_bands_str: str) -> list:
+        """
+        Parse raw-band exclude input like "1-5, 92" into sorted 0-based raw indices.
+
+        UI contract: user input is always RAW sensor band numbering (1-based).
+        """
+        if not exclude_bands_str:
+            return []
+
+        indices = set()
+        for part in exclude_bands_str.split(','):
+            token = part.strip()
+            if not token:
+                continue
+
+            if '-' in token:
+                start_str, end_str = token.split('-', 1)
+                start = int(start_str)
+                end = int(end_str)
+                if start <= 0 or end <= 0 or end < start:
+                    raise ValueError(
+                        f"Invalid raw band range: '{token}'. Use 1-based positive ranges like '1-10'."
+                    )
+                for idx in range(start, end + 1):
+                    indices.add(idx - 1)
+            else:
+                idx = int(token)
+                if idx <= 0:
+                    raise ValueError(
+                        f"Invalid raw band index: '{token}'. Use 1-based positive integers."
+                    )
+                indices.add(idx - 1)
+
+        return sorted(indices)
+
+    @staticmethod
+    def _build_processed_raw_dependencies(raw_band_count: int, prep_chain: list) -> list:
+        """
+        Build processed-feature -> raw-band dependency sets for a preprocessing chain.
+
+        Returns:
+            dependencies: list[set[int]] where dependencies[i] is the RAW band set
+            required to produce processed feature i after applying prep_chain in order.
+        """
+        if raw_band_count <= 0:
+            return []
+
+        dependencies = [{i} for i in range(raw_band_count)]
+
+        for step in prep_chain or []:
+            name = step.get('name')
+            params = step.get('params', {})
+
+            if name == "SG":
+                window_size = int(params.get('win', 5))
+                if window_size % 2 == 0:
+                    window_size += 1
+                radius = max(window_size // 2, 0)
+                last = len(dependencies) - 1
+                expanded = []
+                for i in range(len(dependencies)):
+                    dep = set()
+                    left = max(0, i - radius)
+                    right = min(last, i + radius)
+                    for j in range(left, right + 1):
+                        dep.update(dependencies[j])
+                    expanded.append(dep)
+                dependencies = expanded
+
+            elif name == "SimpleDeriv":
+                gap = int(params.get('gap', 5))
+                order = int(params.get('order', 1))
+                if gap < 1 or order < 1:
+                    continue
+                for _ in range(order):
+                    if len(dependencies) <= gap:
+                        raise ValueError(
+                            f"Strict Mode Error: Not enough bands to build derivative dependencies. "
+                            f"Has {len(dependencies)}, Need > {gap}."
+                        )
+                    dependencies = [
+                        dependencies[i] | dependencies[i + gap]
+                        for i in range(len(dependencies) - gap)
+                    ]
+
+            elif name in {"SNV", "L2", "MinSub", "MinMax", "Absorbance", None}:
+                # Positional mapping preserved for these transforms.
+                continue
+
+            else:
+                # Unknown/legacy transforms are treated as position-preserving by default.
+                continue
+
+        return dependencies
+
+    @staticmethod
+    def map_raw_excludes_to_processed_indices(raw_exclude_indices, raw_band_count: int, prep_chain: list) -> list:
+        """
+        Map RAW-band exclusions to processed feature indices.
+
+        Policy:
+        - User exclusions are always RAW sensor band numbers.
+        - A processed feature is excluded if its positional RAW dependency intersects
+          any excluded RAW band.
+        - Global spectrum normalizers (SNV/L2/MinMax/MinSub) preserve positional mapping
+          for exclusion purposes; they do not remap feature indices.
+        """
+        if raw_band_count <= 0 or not raw_exclude_indices:
+            return []
+
+        raw_exclude_set = {int(i) for i in raw_exclude_indices if 0 <= int(i) < raw_band_count}
+        if not raw_exclude_set:
+            return []
+
+        dependencies = ProcessingService._build_processed_raw_dependencies(raw_band_count, prep_chain)
+
+        return [i for i, dep in enumerate(dependencies) if dep & raw_exclude_set]
+
+    @staticmethod
+    def map_processed_indices_to_raw_dependencies(processed_indices, raw_band_count: int, prep_chain: list) -> list:
+        """
+        Map processed feature indices back to the sorted unique RAW sensor band indices
+        required to reproduce them at runtime.
+        """
+        if raw_band_count <= 0 or not processed_indices:
+            return []
+
+        dependencies = ProcessingService._build_processed_raw_dependencies(raw_band_count, prep_chain)
+        required_raw = set()
+
+        for idx in processed_indices:
+            p_idx = int(idx)
+            if 0 <= p_idx < len(dependencies):
+                required_raw.update(dependencies[p_idx])
+            else:
+                raise ValueError(
+                    f"Processed feature index out of range for dependency mapping: {p_idx} "
+                    f"(processed feature count={len(dependencies)})"
+                )
+
+        return sorted(required_raw)
+
+    @staticmethod
     def apply_preprocessing_chain(flat_data, prep_chain):
         """
         Apply a list of preprocessing steps to flattened data (N, Bands).
