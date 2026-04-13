@@ -70,6 +70,9 @@ class OptimizationWorker(QObject):
 
             assert self.cached_X is not None and self.cached_y is not None  # AI가 수정함: 캐시 준비 후 None 방지
             self.log_message.emit(f"Data Ready: {self.cached_X.shape[0]} pixels cached in memory.")
+            # AI가 수정함: raw_band_count가 0이면 base data에서 lazy 결정 (메인 스레드 I/O 블로킹 방지 목적으로 0이 전달된 경우)
+            if self.raw_band_count == 0:
+                self.raw_band_count = int(self.cached_X.shape[1])
             # AI가 수정함: 총 trial 수 사전 계산 (progress bar용)
             _band_range = [self.initial_params.get('n_features', 5)]  # AI가 수정함: Full Band 기본 trial 수 1개
             if self.initial_params.get('band_selection_method') != 'full':  # AI가 수정함: 일반 모드 trial 범위 사용

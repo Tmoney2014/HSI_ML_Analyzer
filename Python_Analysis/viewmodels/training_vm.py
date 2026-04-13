@@ -212,6 +212,30 @@ class TrainingViewModel(QObject):
             'exclude_bands': self.analysis_vm.exclude_bands_str
         }
 
+    def _get_raw_band_count_cached_only(self):
+        """
+        /// <ai>AI가 작성함</ai>
+        Return RAW sensor band count using only already-cached files to avoid blocking
+        the main (UI) thread with disk I/O.
+
+        Falls back to 0 if no cached files are available — OptimizationWorker.run()
+        will set self.raw_band_count from cached_X.shape[1] after _prepare_base_data().
+        """
+        EXCLUDED_NAMES = {"-", "unassigned", "trash", "ignore"}
+        for group_name, files in sorted(self.main_vm.file_groups.items()):
+            if group_name.lower() in EXCLUDED_NAMES:
+                continue
+            for path in sorted(files):
+                if path in self.excluded_files:
+                    continue
+                if path in self.main_vm.data_cache:
+                    cube, waves = self.main_vm.data_cache[path]
+                    count = int(cube.shape[2])
+                    if waves is not None and len(waves) > 0:
+                        count = int(len(waves))
+                    return count  # AI가 수정함: 첫 번째 캐시 히트만으로도 충분
+        return 0  # AI가 수정함: 캐시 미스 — 0 반환하여 워커가 lazy 결정하도록 위임
+
     def _get_raw_band_count(self):
         """Return authoritative RAW sensor band count from loaded cubes/wavelengths."""
         EXCLUDED_NAMES = {"-", "unassigned", "trash", "ignore"}
@@ -453,7 +477,7 @@ class TrainingViewModel(QObject):
         
         # 1. State Snapshot (AI가 수정함: 공통 메서드 사용)
         vm_state = self._create_vm_state_snapshot()
-        raw_band_count = self._get_raw_band_count()
+        raw_band_count = self._get_raw_band_count_cached_only()  # AI가 수정함: 메인 스레드 I/O 블로킹 방지 — 캐시에 있는 파일만 사용, 없으면 0 전달하여 워커에서 lazy 결정
         
         # 2. Initial Params (From UI)
         prep_chain_copy = []
@@ -491,6 +515,7 @@ class TrainingViewModel(QObject):
         # 4. Connect Signals
         self.opt_thread.started.connect(self.opt_worker.run)
         self.opt_worker.log_message.connect(self.log_message)
+        self.opt_worker.progress_update.connect(self.progress_update)  # AI가 수정함: 최적화 진행률 UI 연결 누락 수정
         self.opt_worker.optimization_finished.connect(self._on_optimization_cleanup)  # AI가 수정함: cleanup 함수로 변경
         self.opt_worker.base_data_ready.connect(self.on_base_data_ready)
         
@@ -519,6 +544,7 @@ class TrainingViewModel(QObject):
         if self.opt_worker:
             try:
                 self.opt_worker.log_message.disconnect()
+                self.opt_worker.progress_update.disconnect()  # AI가 수정함: progress_update 연결 추가에 따른 cleanup 대응
                 self.opt_worker.optimization_finished.disconnect()
                 self.opt_worker.base_data_ready.disconnect()
             except (TypeError, RuntimeError):
