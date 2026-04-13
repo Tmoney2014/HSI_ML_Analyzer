@@ -251,8 +251,16 @@ class TabTraining(QWidget):
         exp_gap_row.addStretch(1)
         exp_layout.addLayout(exp_gap_row)
 
-        self.lbl_experiment_spa_greedy_warning = QLabel("⚠️ SPA-LDA Greedy selected — experiment may be very slow.")
-        self.lbl_experiment_spa_greedy_warning.setStyleSheet("color: #FF6F00; font-size: 11px;")
+        self.lbl_experiment_spa_greedy_warning = QLabel(  # AI가 수정함: 경고 강화 — 예상 시간 근거 포함
+            "🚨 SPA-LDA Greedy selected — this method runs cv×k×B LDA fits per trial "
+            "(e.g. B=150, k=5 → ~2,220 fits). "
+            "Experiment will be extremely slow. Consider SPA-LDA Fast instead."
+        )
+        self.lbl_experiment_spa_greedy_warning.setStyleSheet(  # AI가 수정함: 빨간 배경 + 굵은 글씨로 눈에 띄게
+            "color: #FFFFFF; background-color: #B71C1C; "
+            "font-size: 11px; font-weight: bold; "
+            "padding: 4px 6px; border-radius: 3px;"
+        )
         self.lbl_experiment_spa_greedy_warning.setWordWrap(True)
         self.lbl_experiment_spa_greedy_warning.setVisible(False)  # AI가 수정함: 기본 숨김
         exp_layout.addWidget(self.lbl_experiment_spa_greedy_warning)

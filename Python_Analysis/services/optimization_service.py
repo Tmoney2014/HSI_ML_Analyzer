@@ -178,3 +178,63 @@ class OptimizationService(QObject):
             with open(json_path, "w", encoding="utf-8") as f:  # AI가 수정함: JSON 기록 시작
                 f.write(json.dumps(best_params, ensure_ascii=False, indent=2))  # AI가 수정함: best params 저장
 
+            # n_bands별 최대 test_acc 요약 테이블 → _summary.md  # AI가 수정함: n_bands 비교 요약 추가
+            self._write_n_bands_summary_md(output_dir, history)  # AI가 수정함: MD 요약 저장
+
+    def _write_n_bands_summary_md(self, output_dir, history):  # AI가 수정함: n_bands별 최대 test_acc 요약 MD 생성
+        """
+        history에서 (band_method, n_bands) 조합별 최대 test_acc를 집계하여
+        Markdown 테이블로 저장한다.
+
+        행 = band_method (알파벳 순),
+        열 = n_bands (숫자 오름차순, 'full' 맨 뒤),
+        셀 = max test_acc (%) — 해당 조합이 없으면 '-'.
+        """
+        import os  # AI가 수정함: 로컬 import (이미 상위 _generate_report에서 import 됐으나 메서드 독립성 보장)
+
+        # 1. 집계: (band_method, n_bands_label) → max acc  # AI가 수정함: 집계 로직
+        agg = {}  # AI가 수정함: {(band_method, n_bands_label): max_acc}
+        for params, acc in history:  # AI가 수정함: history 순회
+            bm = params.get("band_selection_method", "unknown")  # AI가 수정함: band method 추출
+            if bm == "full":  # AI가 수정함: full band → 레이블 "full"
+                nb_label = "full"
+            else:
+                nb_label = str(params.get("n_features", "?"))  # AI가 수정함: 정수 → 문자열
+            key = (bm, nb_label)  # AI가 수정함: 집계 키
+            if key not in agg or acc > agg[key]:  # AI가 수정함: 최댓값 유지
+                agg[key] = acc
+
+        if not agg:  # AI가 수정함: 데이터 없으면 저장 생략
+            return
+
+        # 2. 고유 band_methods / n_bands 목록 정렬  # AI가 수정함: 축 정렬
+        band_methods = sorted({k[0] for k in agg})  # AI가 수정함: 알파벳 순
+        raw_nb = {k[1] for k in agg}  # AI가 수정함: n_bands 레이블 집합
+        numeric_nb = sorted([nb for nb in raw_nb if nb != "full"], key=lambda x: int(x))  # AI가 수정함: 숫자 오름차순
+        n_bands_cols = numeric_nb + (["full"] if "full" in raw_nb else [])  # AI가 수정함: full 맨 뒤
+
+        # 3. Markdown 테이블 생성  # AI가 수정함: MD 렌더링
+        header = "| Band Method | " + " | ".join(n_bands_cols) + " |"  # AI가 수정함: 헤더 행
+        separator = "| --- | " + " | ".join(["---"] * len(n_bands_cols)) + " |"  # AI가 수정함: 구분선
+        rows = []  # AI가 수정함: 데이터 행 목록
+        for bm in band_methods:  # AI가 수정함: band_method 행 순회
+            cells = []  # AI가 수정함: 셀 값 목록
+            for nb in n_bands_cols:  # AI가 수정함: n_bands 열 순회
+                val = agg.get((bm, nb))  # AI가 수정함: 해당 조합의 최대 acc
+                cells.append(f"{val:.2f}%" if val is not None else "-")  # AI가 수정함: 포맷 또는 '-'
+            rows.append(f"| {bm} | " + " | ".join(cells) + " |")  # AI가 수정함: 행 완성
+
+        lines = [  # AI가 수정함: MD 파일 전체 내용
+            "# Optimization Summary — Best Test Accuracy by n_bands",
+            "",
+            "행: Band Selection Method | 열: n_bands | 셀: 최대 Test Accuracy (gap 무관)",
+            "",
+            header,
+            separator,
+        ] + rows + [""]
+
+        md_path = os.path.join(output_dir, "optimization_summary.md")  # AI가 수정함: 저장 경로
+        with open(md_path, "w", encoding="utf-8") as f:  # AI가 수정함: MD 파일 저장
+            f.write("\n".join(lines))  # AI가 수정함: 줄바꿈 연결 후 쓰기
+
+

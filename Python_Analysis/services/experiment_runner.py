@@ -445,6 +445,93 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
         return out_path  # AI가 수정함: 저장된 PNG 경로 반환
 
     @staticmethod
+    def _build_n_bands_matrix(ok_results, band_methods, model_types, metric_key="test_acc"):
+        """
+        // AI가 수정함: n_bands별 비교 행렬 생성.
+        행 = (band_method, model_type) 조합, 열 = n_bands (숫자 오름차순, "full" 마지막).
+        각 셀 = 해당 (band_method, model_type, n_bands) 조합의 metric 최대값.
+        반환값:
+            n_bands_sorted: list — 정렬된 n_bands 레이블 (숫자 오름차순, "full" 마지막)
+            row_labels: list[str] — "(band_method) / (model_type)" 행 레이블
+            matrix: list[list[float|nan]] — row_labels × n_bands_sorted 행렬
+        """
+        # n_bands 값 수집 — 숫자는 int 변환, "full"은 문자열 그대로
+        raw_n = set()
+        for r in ok_results:
+            v = r.get("n_bands", "")
+            raw_n.add(v)
+
+        def _sort_key(v):
+            try:
+                return (0, int(v))
+            except (TypeError, ValueError):
+                return (1, str(v))  # "full" 등 문자열은 맨 뒤
+
+        n_bands_sorted = sorted(raw_n, key=_sort_key)
+
+        row_labels = [f"{bm} / {mt}" for bm in band_methods for mt in model_types]
+        matrix = []
+        for bm in band_methods:
+            for mt in model_types:
+                row = []
+                for nb in n_bands_sorted:
+                    candidates = [
+                        r for r in ok_results
+                        if r.get("band_method") == bm
+                        and r.get("model_type") == mt
+                        and r.get("n_bands") == nb
+                    ]
+                    if candidates:
+                        best_val = max(float(r.get(metric_key, 0) or 0) for r in candidates)
+                        row.append(best_val)
+                    else:
+                        row.append(np.nan)
+                matrix.append(row)
+
+        return n_bands_sorted, row_labels, matrix
+
+    @staticmethod
+    def _write_n_bands_heatmap_png(exp_dir, n_bands_sorted, row_labels, matrix, metric_key, title, file_stem, log_callback):
+        """
+        // AI가 수정함: n_bands별 비교 heatmap PNG 저장.
+        행 = (band_method, model_type), 열 = n_bands.
+        """
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except Exception as exc:
+            log_callback(f"[ExperimentRunner] n_bands heatmap skipped ({file_stem}): {exc}")
+            return
+
+        mat = np.array(matrix, dtype=float)
+        n_rows = len(row_labels)
+        n_cols = len(n_bands_sorted)
+
+        fig, ax = plt.subplots(figsize=(max(6, n_cols * 1.2 + 2.0), max(4, n_rows * 0.55 + 1.5)))
+        im = ax.imshow(mat, cmap='viridis', aspect='auto')
+        ax.set_xticks(range(n_cols))
+        ax.set_xticklabels([str(nb) for nb in n_bands_sorted], rotation=0)
+        ax.set_yticks(range(n_rows))
+        ax.set_yticklabels(row_labels, fontsize=8)
+        ax.set_xlabel("n_bands")
+        ax.set_title(title)
+
+        for i in range(n_rows):
+            for j in range(n_cols):
+                value = mat[i][j]
+                label = "-" if np.isnan(value) else (f"{value:.2f}" if metric_key != "f1_macro" else f"{value:.3f}")
+                ax.text(j, i, label, ha='center', va='center',
+                        color='white' if not np.isnan(value) else '#cccccc', fontsize=7)
+
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        fig.tight_layout()
+        out_path = os.path.join(exp_dir, f"{file_stem}.png")
+        fig.savefig(out_path, dpi=120, bbox_inches='tight')
+        plt.close(fig)
+        log_callback(f"[ExperimentRunner] n_bands heatmap saved: {out_path}")
+
+    @staticmethod
     def _best_per_bm_mt(results, metric="test_acc"):
         """
         // AI가 수정함: (band_method, model_type) 조합별 최고 성능 trial 선택.
@@ -532,6 +619,23 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                     rows = self._build_metric_matrix(ok_results, band_methods, model_types, metric_key)
                     self._write_markdown_table(f, ["Band Method", *model_types], rows)
 
+                # AI가 수정함: n_bands별 비교 테이블 (행=band_method/model_type, 열=n_bands, 셀=max test_acc)
+                n_bands_sorted, row_labels, nb_matrix = self._build_n_bands_matrix(
+                    ok_results, band_methods, model_types, metric_key="test_acc"
+                )
+                if n_bands_sorted:
+                    f.write("## Best Test Accuracy by n_bands\n\n")
+                    f.write("> 각 셀은 해당 (밴드선택/모델, n_bands) 조합에서 gap에 무관하게 가장 높은 Test Accuracy\n\n")
+                    table_headers = ["Band Selection / Model", *[str(nb) for nb in n_bands_sorted]]
+                    table_rows = [
+                        [row_labels[i]] + [
+                            f"{nb_matrix[i][j]:.4f}" if not np.isnan(nb_matrix[i][j]) else "-"
+                            for j in range(len(n_bands_sorted))
+                        ]
+                        for i in range(len(row_labels))
+                    ]
+                    self._write_markdown_table(f, table_headers, table_rows)
+
                 # AI가 수정함: per-trial confusion matrix 참조 섹션
                 cm_entries = [
                     r for r in ok_results
@@ -563,3 +667,14 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
             self._write_heatmap_png(exp_dir, _best_results, band_methods, model_types, "test_acc", "Test Accuracy Matrix", f"{csv_timestamp}_paper_matrix_test_acc", log_callback)
             self._write_heatmap_png(exp_dir, _best_results, band_methods, model_types, "f1_macro", "Macro F1 Matrix", f"{csv_timestamp}_paper_matrix_f1_macro", log_callback)
             self._write_heatmap_png(exp_dir, _best_results, band_methods, model_types, "train_time_ms", "Train Time Matrix (ms)", f"{csv_timestamp}_paper_matrix_train_time_ms", log_callback)
+            # AI가 수정함: n_bands별 비교 heatmap (행=band_method/model_type, 열=n_bands)
+            n_bands_sorted, row_labels, nb_matrix = self._build_n_bands_matrix(
+                ok_results, band_methods, model_types, metric_key="test_acc"
+            )
+            if n_bands_sorted:
+                self._write_n_bands_heatmap_png(
+                    exp_dir, n_bands_sorted, row_labels, nb_matrix,
+                    "test_acc", "Best Test Accuracy by n_bands",
+                    f"{csv_timestamp}_paper_matrix_n_bands_test_acc",
+                    log_callback,
+                )

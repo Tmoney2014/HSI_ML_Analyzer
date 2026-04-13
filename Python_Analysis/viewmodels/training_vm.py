@@ -18,7 +18,7 @@ from services.optimization_worker import OptimizationWorker
 from services.experiment_worker import ExperimentWorker  # AI가 수정함: Experiment Grid 워커 임포트
 from models import processing
 
-_ALL_BAND_METHODS = ['spa', 'full', 'anova_f', 'spa_lda_fast', 'spa_lda_greedy', 'lda_coef']  # AI가 추가함: 전체 밴드 선택 방법 목록 (Task 4 OptimizationWorker 연동용)
+_ALL_BAND_METHODS = ['spa', 'full', 'anova_f', 'spa_lda_fast', 'lda_coef']  # AI가 수정함: spa_lda_greedy 제외 — Optimize 루프에서 cv×k×B 반복으로 매우 느림 (Experiment에서만 선택적 사용)
 
 class TrainingViewModel(QObject):
     log_message = pyqtSignal(str)
