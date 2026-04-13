@@ -18,6 +18,8 @@ from services.optimization_worker import OptimizationWorker
 from services.experiment_worker import ExperimentWorker  # AI가 수정함: Experiment Grid 워커 임포트
 from models import processing
 
+_ALL_BAND_METHODS = ['spa', 'full', 'anova_f', 'spa_lda_fast', 'spa_lda_greedy', 'lda_coef']  # AI가 추가함: 전체 밴드 선택 방법 목록 (Task 4 OptimizationWorker 연동용)
+
 class TrainingViewModel(QObject):
     log_message = pyqtSignal(str)
     progress_update = pyqtSignal(int)
@@ -46,6 +48,9 @@ class TrainingViewModel(QObject):
         self.band_selection_method = "spa"  # AI가 수정함: 밴드 선택 방법 (기본값 SPA)
         self.experiment_band_methods = ["spa"]  # AI가 수정함: Export Matrix용 다중 밴드 선택 기본값
         self.experiment_model_types = ["Linear SVM"]  # AI가 수정함: Export Matrix용 다중 모델 기본값
+        self.experiment_n_bands_list: list = [self.n_features]  # AI가 추가함: 실험 그리드 n_bands 목록 (기본: 현재 n_features)
+        self.experiment_gap_min: int = 1   # AI가 추가함: 실험 그리드 gap 범위 최솟값
+        self.experiment_gap_max: int = 20  # AI가 추가함: 실험 그리드 gap 범위 최댓값
         
         # Threading state
         self.worker_thread = None
@@ -66,6 +71,7 @@ class TrainingViewModel(QObject):
         
         # AI가 추가함: 최적화 결과 저장 (최적화 완료 전 UI 접근 시 AttributeError 방지)
         self.best_n_features = self.n_features
+        self.best_band_method: Optional[str] = None  # AI가 추가함: 최적화 완료 후 설정되는 최적 밴드 선택 방법 (transient)
         
         # Cache Invalidation: When underlying data changes, clear caches
         # AI가 수정함: params_changed 대신 base_data_invalidated 연결 (Gap 변경 시 무효화 방지)
@@ -93,6 +99,9 @@ class TrainingViewModel(QObject):
             "band_selection_method": self.band_selection_method,  # AI가 수정함: 밴드 선택 방법 저장
             "experiment_band_methods": list(self.experiment_band_methods),  # AI가 수정함: Export Matrix 밴드 방법 목록 저장
             "experiment_model_types": list(self.experiment_model_types),  # AI가 수정함: Export Matrix 모델 목록 저장
+            "experiment_n_bands_list": list(self.experiment_n_bands_list),  # AI가 추가함: 실험 그리드 n_bands 목록 저장
+            "experiment_gap_min": self.experiment_gap_min,  # AI가 추가함: 실험 그리드 gap 최솟값 저장
+            "experiment_gap_max": self.experiment_gap_max,  # AI가 추가함: 실험 그리드 gap 최댓값 저장
             # AI가 추가함: 제외 목록 저장 (list로 변환)
             "excluded_files": list(self.excluded_files)
         }
@@ -146,6 +155,18 @@ class TrainingViewModel(QObject):
         self.experiment_model_types = [m for m in _raw_exp_model_types if m in _known_model_types]  # AI가 수정함: 허용된 모델만 유지
         if not self.experiment_model_types:  # AI가 수정함: 비어 있으면 현재 단일 모델로 fallback
             self.experiment_model_types = [self.model_type]  # AI가 수정함: 최소 1개 보장
+        # AI가 추가함: 실험 그리드 n_bands 목록 / gap 범위 로드
+        _raw_n_bands_list = config.get('experiment_n_bands_list', [self.n_features])
+        if isinstance(_raw_n_bands_list, list) and _raw_n_bands_list:
+            self.experiment_n_bands_list = [int(v) for v in _raw_n_bands_list if str(v).isdigit() or isinstance(v, int)]
+        if not self.experiment_n_bands_list:
+            self.experiment_n_bands_list = [self.n_features]
+        try:
+            self.experiment_gap_min = int(config.get('experiment_gap_min', 1))
+            self.experiment_gap_max = int(config.get('experiment_gap_max', 20))
+        except (ValueError, TypeError):
+            self.experiment_gap_min = 1
+            self.experiment_gap_max = 20
             
         # AI가 추가함: 제외 목록 복원
         if "excluded_files" in config:
@@ -190,6 +211,45 @@ class TrainingViewModel(QObject):
             'dark_ref': self.main_vm.cache_dark,
             'exclude_bands': self.analysis_vm.exclude_bands_str
         }
+
+    def _get_raw_band_count(self):
+        """Return authoritative RAW sensor band count from loaded cubes/wavelengths."""
+        EXCLUDED_NAMES = {"-", "unassigned", "trash", "ignore"}
+        candidate_files = []
+        for group_name, files in sorted(self.main_vm.file_groups.items()):
+            if group_name.lower() in EXCLUDED_NAMES:
+                continue
+            for path in sorted(files):
+                if path not in self.excluded_files:
+                    candidate_files.append(path)
+
+        if not candidate_files:
+            raise ValueError("No active files available to determine raw band count.")
+
+        raw_band_count = None
+        for file_path in candidate_files:
+            if file_path in self.main_vm.data_cache:
+                cube, waves = self.main_vm.data_cache[file_path]
+            else:
+                cube, waves = load_hsi_data(file_path)
+                cube = np.nan_to_num(cube)
+                self.main_vm.data_cache[file_path] = (cube, waves)
+
+            current_count = int(cube.shape[2])
+            if waves is not None and len(waves) > 0:
+                current_count = int(len(waves))
+
+            if raw_band_count is None:
+                raw_band_count = current_count
+            elif raw_band_count != current_count:
+                raise ValueError(
+                    f"Inconsistent raw band count across files: {raw_band_count} != {current_count} ({file_path})"
+                )
+
+        if raw_band_count is None or raw_band_count <= 0:
+            raise ValueError("Failed to determine raw band count from active files.")
+
+        return raw_band_count
 
 
     def _compute_config_hash(self, vm_state):
@@ -249,6 +309,7 @@ class TrainingViewModel(QObject):
         
         # 2. State Snapshot (AI가 수정함: 공통 메서드 사용)
         vm_state = self._create_vm_state_snapshot()
+        raw_band_count = self._get_raw_band_count()
         
         # AI가 수정함: 캐시 구조 통합 - Base Data 캐시만 사용
         # 3. Worker Params
@@ -265,6 +326,7 @@ class TrainingViewModel(QObject):
             # AI가 추가함: 제외 목록 전달
             'excluded_files': self.excluded_files.copy(),
             'band_selection_method': self.band_selection_method,  # AI가 수정함: 하드코딩 제거
+            'raw_band_count': raw_band_count,
         }
         
         # 4. Create Thread
@@ -391,6 +453,7 @@ class TrainingViewModel(QObject):
         
         # 1. State Snapshot (AI가 수정함: 공통 메서드 사용)
         vm_state = self._create_vm_state_snapshot()
+        raw_band_count = self._get_raw_band_count()
         
         # 2. Initial Params (From UI)
         prep_chain_copy = []
@@ -404,6 +467,7 @@ class TrainingViewModel(QObject):
             # AI가 추가함: 제외 목록 전달
             'excluded_files': self.excluded_files.copy(),
             'band_selection_method': self.band_selection_method,  # AI가 수정함: 하드코딩 제거
+            'raw_band_count': raw_band_count,
         }
         
         # 3. Create Worker & Thread
@@ -419,7 +483,8 @@ class TrainingViewModel(QObject):
             initial_params,
             model_type=model_type,  # AI가 수정함: 모델 타입 전달
             base_data_cache=dict(self.cached_base_data),  # AI가 수정함: race condition 방지 — snapshot copy 전달
-            output_dir=self.output_folder  # AI가 수정함: output_dir 전달
+            output_dir=self.output_folder,  # AI가 수정함: output_dir 전달
+            band_methods=_ALL_BAND_METHODS  # AI가 추가함: 전체 밴드 선택 방법 목록 전달
         )
         self.opt_worker.moveToThread(self.opt_thread)
         
@@ -474,6 +539,8 @@ class TrainingViewModel(QObject):
                 self.analysis_vm.set_preprocessing_chain(best_params['prep'])
                 if best_params.get('band_selection_method') != 'full':  # AI가 수정함: Full Band는 스피너 업데이트 불필요
                     self.best_n_features = best_params.get('n_features', 5)  # AI가 수정함: SPA 등 일반 모드만 업데이트
+                if best_params.get('band_selection_method'):  # AI가 추가함: 최적 밴드 선택 방법 저장 (transient)
+                    self.best_band_method = best_params['band_selection_method']
             
             # AI가 수정함: 캐시 덮어쓰기 삭제 (Dict 유지)
             # OptimizationWorker는 파일별로 base_data_ready를 방출하므로 자동 캐싱됨.
@@ -498,21 +565,26 @@ class TrainingViewModel(QObject):
         self.opt_worker = None
         self.opt_thread = None
 
-    def run_experiment_grid(self, band_methods: list, model_types: list):  # AI가 수정함: 실험 그리드 실행
+    def run_experiment_grid(self, band_methods: list, model_types: list,
+                            n_bands_list: Optional[list] = None, gap_min: int = 1, gap_max: int = 20):  # AI가 수정함: 4D 실험 검색 공간 파라미터 추가
         """Async Experiment Grid Entry Point."""
+        _n_bands_list = n_bands_list if n_bands_list is not None else [self.n_features]  # AI가 추가함: 기본값 현재 n_features
         if not self._safe_cleanup_exp_thread(): return
         self.experiment_band_methods = list(band_methods)  # AI가 수정함: Export Matrix 선택 상태 동기화
         self.experiment_model_types = list(model_types)  # AI가 수정함: Export Matrix 선택 상태 동기화
         self._ensure_ref_loaded()
         vm_state = self._create_vm_state_snapshot()
+        raw_band_count = self._get_raw_band_count()
         params = {
             'band_methods': band_methods,
             'model_types': model_types,
-            'n_bands': self.n_features,
+            'n_bands_list': _n_bands_list,  # AI가 수정함: 단일 n_bands → n_bands_list로 교체
+            'gap_range': (gap_min, gap_max),  # AI가 추가함: gap 범위 전달
             'test_ratio': self.val_ratio,
             'output_dir': self.output_folder,
             'excluded_files': self.excluded_files.copy(),
             'band_selection_method': self.band_selection_method,
+            'raw_band_count': raw_band_count,
         }
         self.exp_thread = QThread()
         groups_copy = {k: list(v) for k, v in self.main_vm.file_groups.items()}

@@ -19,7 +19,7 @@ class OptimizationWorker(QObject):
     data_ready = pyqtSignal(object, object)  # AI가 수정함: 캐시 저장용 (X, y)
     base_data_ready = pyqtSignal(object, object)  # AI가 수정함: 통합 캐시용 Base Data
     
-    def __init__(self, file_groups, vm_state, main_vm_cache, initial_params, model_type="Linear SVM", base_data_cache=None, output_dir=None):  # AI가 수정함: output_dir 인자 추가
+    def __init__(self, file_groups, vm_state, main_vm_cache, initial_params, model_type="Linear SVM", base_data_cache=None, output_dir=None, band_methods=None):  # AI가 수정함: band_methods 인자 추가
         super().__init__()
         self.file_groups = file_groups
         # VM State Snapshot (Read-Only)
@@ -37,13 +37,14 @@ class OptimizationWorker(QObject):
         self.data_cache = main_vm_cache 
         self.initial_params = initial_params
         self.base_data_cache = base_data_cache # Handoff Data
+        self.raw_band_count = int(initial_params.get('raw_band_count', 0) or 0)  # AI가 추가함: authoritative RAW sensor band count
         self.output_dir = output_dir  # AI가 수정함: 저장 경로
         
         # AI가 추가함: 제외 파일 목록
         self.excluded_files = initial_params.get('excluded_files', set())
         
         self.model_type = model_type
-        self.band_selection_method = initial_params.get('band_selection_method', 'spa')  # AI가 수정함: 하드코딩 제거
+        self.band_methods = band_methods if band_methods is not None else [initial_params.get('band_selection_method', 'spa')]  # AI가 수정함: band_methods 목록 (복수)
         
         # Thread-safe Cache will be created in run() to ensure thread affinity
         self.service = None 
@@ -76,7 +77,9 @@ class OptimizationWorker(QObject):
             _gap_range = [0]  # AI가 수정함: SimpleDeriv 없을 때 gap trial 없음
             if any(s.get('name') == 'SimpleDeriv' for s in self.initial_params.get('prep', [])):  # AI가 수정함: SimpleDeriv 포함 여부 확인
                 _gap_range = list(range(1, 41))  # AI가 수정함: gap 탐색 범위
-            self._total_trials = len(_band_range) * len(_gap_range)  # AI가 수정함: progress bar 분모 계산
+            # AI가 수정함: 'full' 메서드는 n_bands 탐색 없이 trial 1개; 나머지는 _band_range 전체
+            _per_method_trials = sum(1 if m == 'full' else len(_band_range) for m in self.band_methods)
+            self._total_trials = _per_method_trials * len(_gap_range)  # AI가 수정함: band_methods 수 반영하여 progress bar 분모 계산
             self._completed_trials = 0  # AI가 수정함: 진행률 카운터 초기화
             
             # 2. Instantiate Service in THIS thread
@@ -84,7 +87,7 @@ class OptimizationWorker(QObject):
             self.service.log_message.connect(self.log_message.emit)
             
             # Run the generic optimization algorithm
-            best_params, history = self.service.run_optimization(self.initial_params, self.trial_callback)
+            best_params, history = self.service.run_optimization(self.initial_params, self.trial_callback, band_methods=self.band_methods)
 
             actual_best_acc = max((acc for _, acc in history), default=0.0)  # AI가 수정함: 마지막 trial이 아닌 실제 최고 정확도 계산
             if self.output_dir:  # AI가 수정함: output_dir이 있을 때만 report 저장
@@ -111,9 +114,10 @@ class OptimizationWorker(QObject):
         # 1. Parse Trial Params
         trial_prep = params['prep']
         n_features = params.get('n_features', 5)
+        band_method = params.get('band_selection_method', 'spa')  # AI가 수정함: per-trial band_method 추출
         
         # 2. Run Pipeline on Cached Data (Fast)
-        score = self._evaluate_cached_data(trial_prep, n_features)
+        score = self._evaluate_cached_data(trial_prep, n_features, band_method=band_method)  # AI가 수정함: band_method 전달
         self._completed_trials += 1  # AI가 수정함: 진행률 추적
         if self._total_trials > 0:  # AI가 수정함: 0 나누기 방어
             pct = int(self._completed_trials * 100 / self._total_trials)  # AI가 수정함: 진행률 계산
@@ -219,7 +223,7 @@ class OptimizationWorker(QObject):
             
         return True
 
-    def _evaluate_cached_data(self, prep_chain, n_features):
+    def _evaluate_cached_data(self, prep_chain, n_features, band_method=None):  # AI가 수정함: band_method 파라미터 추가
         """
         Apply Preprocessing to Cached Data -> Band Selection -> Train -> Score
         """
@@ -234,17 +238,14 @@ class OptimizationWorker(QObject):
         X = ProcessingService.apply_preprocessing_chain(X, prep_chain)
             
         # 2. Band Selection (SPA)
-        # Parse Exclude Bands (From self.exclude_bands_str)
-        exclude_indices = []
+        # Parse RAW-band exclusions and map to processed feature indices
+        raw_exclude_indices = []
         if self.exclude_bands_str:
-            try:
-                for part in self.exclude_bands_str.split(','):
-                    if '-' in part:
-                        start, end = map(int, part.split('-'))
-                        exclude_indices.extend(range(start - 1, end))
-                    else:
-                        exclude_indices.append(int(part) - 1)
-            except (ValueError, TypeError): pass  # AI가 수정함: bare except → specific types (코드 품질)
+            raw_exclude_indices = ProcessingService.parse_raw_band_indices(self.exclude_bands_str)
+
+        exclude_indices = ProcessingService.map_raw_excludes_to_processed_indices(
+            raw_exclude_indices, self.raw_band_count, prep_chain
+        )
         
         # AI가 수정함: Gap Diff로 밴드 수가 줄어들면 범위 초과 인덱스 무시
         n_bands = X.shape[1]
@@ -270,7 +271,7 @@ class OptimizationWorker(QObject):
         selected_indices, _, _ = select_best_bands(
             dummy, 
             n_bands=n_features, 
-            method=self.band_selection_method,  # AI가 수정함: 하드코딩 제거
+            method=band_method or 'spa',  # AI가 수정함: per-trial band_method 사용
             exclude_indices=exclude_indices,
             labels=self.cached_y  # AI가 수정함: supervised 밴드 선택 방법을 위해 cached_y 전달
         )

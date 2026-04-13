@@ -49,10 +49,17 @@ class ExperimentWorker(QObject):  # AI가 수정함: QObject 상속 (QThread 아
         # AI가 수정함: params dict에서 실험 파라미터 추출
         self.band_methods = params.get('band_methods', ['spa'])  # AI가 수정함: 밴드 선택 방법 목록
         self.model_types = params.get('model_types', ['LDA'])    # AI가 수정함: 모델 종류 목록
-        self.n_bands = params.get('n_bands', 5)                  # AI가 수정함: 선택 밴드 수
+        # AI가 수정함: n_bands_list backward compat — 구버전 'n_bands' 단일값도 허용
+        _raw_n_bands = params.get('n_bands_list', None)
+        if _raw_n_bands is not None:
+            self.n_bands_list = list(_raw_n_bands)
+        else:
+            self.n_bands_list = [int(params.get('n_bands', 5))]  # AI가 수정함: 구버전 단일값 fallback
+        self.gap_range = params.get('gap_range', (1, 1))  # AI가 수정함: SimpleDeriv gap 탐색 범위
         self.test_ratio = params.get('test_ratio', 0.2)          # AI가 수정함: 테스트 분리 비율
         self.output_dir = params.get('output_dir', 'output/experiments')  # AI가 수정함: CSV 저장 디렉토리
         self.excluded_files = params.get('excluded_files', set())  # AI가 수정함: 제외 파일 집합
+        self.raw_band_count = int(params.get('raw_band_count', 0) or 0)  # AI가 추가함: authoritative RAW sensor band count
         self.band_selection_method = params.get('band_selection_method', 'spa')  # AI가 수정함: 단일 밴드 선택 방법 (미사용 — band_methods 우선)
 
         # AI가 수정함: 스레드 안전 상태
@@ -82,90 +89,41 @@ class ExperimentWorker(QObject):  # AI가 수정함: QObject 상속 (QThread 아
             )
 
             # AI가 수정함: Step 2 — exclude_indices 계산 (OptimizationWorker._evaluate_cached_data 패턴)
-            exclude_indices = []  # AI가 수정함: 제외 밴드 인덱스 목록 초기화
-            if self.exclude_bands_str:  # AI가 수정함: 제외 밴드 문자열이 있을 때만 파싱
-                try:
-                    for part in self.exclude_bands_str.split(','):  # AI가 수정함: 콤마 구분 파싱
-                        if '-' in part:  # AI가 수정함: 범위 표기 (e.g. "10-20")
-                            start, end = map(int, part.split('-'))  # AI가 수정함: 시작-끝 분리
-                            exclude_indices.extend(range(start - 1, end))  # AI가 수정함: 0-based 변환
-                        else:
-                            exclude_indices.append(int(part) - 1)  # AI가 수정함: 단일 인덱스 0-based 변환
-                except Exception:  # AI가 수정함: 파싱 실패 시 무시 (방어적)
-                    pass
+            raw_exclude_indices = ProcessingService.parse_raw_band_indices(self.exclude_bands_str)
+            exclude_indices = ProcessingService.map_raw_excludes_to_processed_indices(
+                raw_exclude_indices, self.raw_band_count, self.base_prep_chain
+            )
 
             # AI가 수정함: Step 3 — ExperimentRunner.run_grid 호출
+            # AI가 수정함: progress bar용 총 trial 수 사전 계산 (근사치)
+            _has_sd = any(s.get('name') == 'SimpleDeriv' for s in self.base_prep_chain)
+            _gap_count = (self.gap_range[1] - self.gap_range[0] + 1) if _has_sd else 1
+            self._total_trials_est = len(self.band_methods) * len(self.n_bands_list) * _gap_count * len(self.model_types)
+            self._completed_trials = 0
+
+            def _progress_log(msg):  # AI가 수정함: [Trial] prefix 감지 → progress emit
+                self.log_message.emit(msg)
+                if msg.startswith("[Trial]"):  # AI가 수정함: trial 완료 신호 감지
+                    self._completed_trials = getattr(self, '_completed_trials', 0) + 1
+                    _total = getattr(self, '_total_trials_est', 1)
+                    if _total > 0:
+                        _pct = int(self._completed_trials * 100 / _total)
+                        self.progress_update.emit(min(_pct, 99))  # AI가 수정함: 100%는 완료 시에만
+
             results = ExperimentRunner().run_grid(  # AI가 수정함: 실험 그리드 실행
                 X_base=self.cached_X,                   # AI가 수정함: 전처리 전 base data
                 y=self.cached_y,                         # AI가 수정함: 클래스 레이블
                 prep_chain=self.base_prep_chain,         # AI가 수정함: vm_state['prep_chain'] 전달
                 band_methods=self.band_methods,          # AI가 수정함: 밴드 선택 방법 목록
                 model_types=self.model_types,            # AI가 수정함: 모델 종류 목록
-                n_bands=self.n_bands,                    # AI가 수정함: 선택 밴드 수
+                n_bands_list=self.n_bands_list,          # AI가 수정함: 선택 밴드 수 목록 (구버전 n_bands 교체)
                 test_ratio=self.test_ratio,              # AI가 수정함: 테스트 분리 비율
                 output_dir=self.output_dir,              # AI가 수정함: CSV 저장 디렉토리
+                gap_range=self.gap_range,                # AI가 수정함: SimpleDeriv gap 탐색 범위
                 exclude_indices=exclude_indices,         # AI가 수정함: 제외 밴드 인덱스
-                log_callback=self.log_message.emit,      # AI가 수정함: 로그 시그널 콜백
+                log_callback=_progress_log,              # AI가 수정함: [Trial] prefix → progress emit 연결
                 stop_flag=lambda: not self.is_running,   # AI가 수정함: 중단 조건 람다
             )
-
-            # AI가 수정함: Confusion Matrix PNG 저장 (성공 trial별 1개씩 저장)
-            if results:  # AI가 수정함: 결과가 있을 때만 저장
-                try:
-                    import matplotlib  # AI가 수정함: backend 설정 필수 (백그라운드 스레드)
-                    matplotlib.use('Agg')  # AI가 수정함: GUI 없는 환경용 backend
-                    import matplotlib.pyplot as plt  # AI가 수정함: 플롯용
-                    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay  # AI가 수정함: confusion matrix
-                    from sklearn.model_selection import train_test_split as _tts  # AI가 수정함: split
-                    from services.processing_service import ProcessingService as _PS  # AI가 수정함: 전처리
-                    from services.band_selection_service import select_best_bands as _sbb  # AI가 수정함: 밴드 선택
-                    from services.learning_service import LearningService as _LS  # AI가 수정함: 학습
-
-                    ok_results = [r for r in results if r.get('status') == 'ok']  # AI가 수정함: 성공 결과만
-                    if ok_results:
-                        X_prep_cm = _PS.apply_preprocessing_chain(  # AI가 수정함: 전처리 적용
-                            self.cached_X.copy(), self.base_prep_chain
-                        )
-                        B_cm = X_prep_cm.shape[1]  # AI가 수정함: 전처리 후 밴드 수
-                        _exp_dir_cm = os.path.join(self.output_dir, 'experiments')  # AI가 수정함: experiments 서브디렉토리
-                        os.makedirs(_exp_dir_cm, exist_ok=True)  # AI가 수정함: 디렉토리 보장
-                        for ok_row in ok_results:  # AI가 수정함: 성공 trial별 confusion matrix 저장
-                            bm_cm = ok_row['band_method']  # AI가 수정함: 밴드 방법
-                            mt_cm = ok_row['model_type']   # AI가 수정함: 모델 종류
-                            ts_cm = ok_row.get('timestamp', 'experiment')  # AI가 수정함: trial 타임스탬프 재사용
-                            safe_model_name = str(mt_cm).replace(' ', '_').replace('/', '_')  # AI가 수정함: 파일명 안전화
-                            sel_idx_cm, _, _ = _sbb(  # AI가 수정함: trial별 밴드 선택 재현
-                                X_prep_cm.reshape(-1, 1, B_cm), self.n_bands,
-                                method=bm_cm, labels=self.cached_y,
-                            )
-                            X_sub_cm = X_prep_cm[:, sel_idx_cm]  # AI가 수정함: 선택된 밴드 슬라이싱
-                            model_cm, _ = _LS().train_model(  # AI가 수정함: trial별 모델 재학습
-                                X_sub_cm, self.cached_y, model_type=mt_cm, test_ratio=self.test_ratio
-                            )
-                            try:  # AI가 수정함: stratify 실패 대비 fallback
-                                _, X_te, _, y_te = _tts(
-                                    X_sub_cm, self.cached_y,
-                                    test_size=self.test_ratio, random_state=42, stratify=self.cached_y
-                                )
-                            except ValueError:  # AI가 수정함: 클래스 샘플 부족 fallback
-                                _, X_te, _, y_te = _tts(
-                                    X_sub_cm, self.cached_y,
-                                    test_size=self.test_ratio, random_state=42
-                                )
-                            y_pred_cm = model_cm.predict(X_te)  # AI가 수정함: 예측
-                            cm_mat = confusion_matrix(y_te, y_pred_cm)  # AI가 수정함: confusion matrix 계산
-
-                            fig_cm, ax_cm = plt.subplots(figsize=(6, 5))  # AI가 수정함: figure 생성
-                            ConfusionMatrixDisplay(confusion_matrix=cm_mat).plot(ax=ax_cm, colorbar=False)  # AI가 수정함: 플롯
-                            ax_cm.set_title(f"Confusion Matrix ({bm_cm} / {mt_cm})")  # AI가 수정함: 제목 설정
-
-                            cm_filename = f"{ts_cm}_{bm_cm}_{safe_model_name}_confusion_matrix.png"  # AI가 수정함: trial별 PNG 파일명
-                            cm_path = os.path.join(_exp_dir_cm, cm_filename)  # AI가 수정함: PNG 경로
-                            fig_cm.savefig(cm_path, dpi=100, bbox_inches='tight')  # AI가 수정함: PNG 저장
-                            plt.close(fig_cm)  # AI가 수정함: figure 닫기 (메모리 해제)
-                            self.log_message.emit(f"Confusion matrix saved: {cm_path}")  # AI가 수정함: 저장 완료 로그
-                except Exception as _cm_err:  # AI가 수정함: confusion matrix 저장 실패 → 비치명적 경고
-                    self.log_message.emit(f"[Warning] Confusion matrix save failed: {_cm_err}")  # AI가 수정함: 경고
 
             # AI가 수정함: Step 4 — 완료 처리
             self.progress_update.emit(100)        # AI가 수정함: 완료 시 100% emit

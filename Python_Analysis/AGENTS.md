@@ -32,7 +32,9 @@ Python_Analysis/
 | Background masking | `models/processing.py::create_background_mask()` | Always call on Raw cube |
 | SPA band selection | `services/band_selection_service.py::select_best_bands()` | Returns `(bands, scores, mean_spectrum)`; `method='spa'`\|`'full'` <!-- AI가 수정함: 지원 method 값 정정 ('variance'→'full') --> |
 | Model train + export | `services/learning_service.py` | `train_model()` → `export_model()` → model.json |
-| Auto-ML loop | `services/optimization_service.py` | Grid-searches Gap, NDI threshold, band count |
+| Auto-ML loop | `services/optimization_service.py` | 3D 탐색: band_method × n_bands × gap; `band_methods` 리스트 파라미터 <!-- AI가 수정함: 3D 탐색 공간 명시 --> |
+| Experiment grid | `services/experiment_runner.py` | 4D 탐색: band_method × n_bands × gap × model_type; 순수 Python 클래스 <!-- AI가 수정함: 신규 항목 추가 --> |
+| Async experiment | `services/experiment_worker.py` | `n_bands_list` + `gap_range` 파라미터; `[Trial]` 로그 prefix로 진행률 emit <!-- AI가 수정함: 신규 항목 추가 --> |
 | Async train | `services/training_worker.py::TrainingWorker` | Emits `base_data_ready` per file for L3 cache |
 | Async optimize | `services/optimization_worker.py::OptimizationWorker` | Same cache protocol as TrainingWorker |
 | Root MVVM state | `viewmodels/main_vm.py::MainViewModel` | file_groups, data_cache, refs, processing_mode |

@@ -64,14 +64,14 @@ train_model(X, y, model_type="Linear SVM", test_ratio=0.2, log_callback=None)
 - Exports `EstimatedFPS` as diagnostic metadata only; it must not be treated as a runtime-correctness input  <!-- AI가 수정함: metadata 성격 명시 -->
 - All band indices in model.json are **0-based**
 
-### `optimization_service.py` — `OptimizationService(QObject)`
+### `optimization_service.py` — `OptimizationService(QObject)` <!-- AI가 수정함: 3D 탐색 공간 확장 반영 -->
 **Signals:** `log_message(str)`
 
 ```python
-run_optimization(initial_params: dict, trial_callback: callable) → (best_params, history)
+run_optimization(initial_params: dict, trial_callback: callable, band_methods=None) → (best_params, history)
 lookahead_hill_climbing(start_val, step, lookahead, max_val, evaluator, ...) → (best_val, best_acc, best_params)
 ```
-Grid searches Band Count × Gap Size; fine-tunes NDI threshold via `lookahead_hill_climbing`. `trial_callback(params) → float score` is provided by `OptimizationWorker`. Full Band 모드(`method='full'`)에서는 로그에 `Bands=Full Band`로 출력 (숫자 없음) <!-- AI가 수정함: Full Band 로그 형식 명시 -->.
+3D 전체 탐색: `band_method × n_bands × gap`. `band_methods=None` 이면 `initial_params['band_selection_method']` 단일값으로 폴백. `_TARGET_KEYS = ["SimpleDeriv"]` — prep_chain에 해당 step이 없으면 `gap_list = [0]` 로 단축. `trial_callback(params) → float score` 는 `OptimizationWorker`가 제공. Full Band 모드(`method='full'`)에서는 로그에 `Bands=Full Band` 출력. dedup key는 `(band_method, n_features, gap)` 3-tuple. <!-- AI가 수정함: 3D 루프 + gap 조건부 + dedup 3-tuple 명시 -->
 
 ### `training_worker.py` — `TrainingWorker(QObject)`
 **Signals:** `progress_update(int)`, `log_message(str)`, `training_finished(bool)`, `base_data_ready(str, tuple)`
@@ -84,10 +84,42 @@ Full async training pipeline:
 5. Train: `LearningService.train_model(X_sub, y, model_type, test_ratio)`
 6. Export: `LearningService.export_model(...)` → model.json
 
-### `optimization_worker.py` — `OptimizationWorker(QObject)`
+### `optimization_worker.py` — `OptimizationWorker(QObject)` <!-- AI가 수정함: band_methods 다중 파라미터 반영 -->
 **Signals:** `progress_update(int)`, `log_message(str)`, `optimization_finished(bool)`, `data_ready(object, object)`, `base_data_ready(object, object)`
 
-Preloads all base data once (`_prepare_base_data`), then passes `trial_callback` to `OptimizationService.run_optimization()`. `trial_callback` applies prep chain + SPA + trains per candidate parameter set. `_prepare_base_data` uses `ProcessingService.get_base_data()` (mask + ref only, no prep chain) to populate the base data cache before optimization trials begin.
+`__init__(band_methods=None)` — `self.band_methods: list` (None이면 `initial_params`에서 단일값 추출). `self.band_selection_method` 속성 제거됨. `_total_trials = len(band_methods) × len(band_range) × len(gap_range)`. `trial_callback`에서 `band_method = params.get('band_selection_method', 'spa')` 추출 → `_evaluate_cached_data(band_method=band_method)` 전달. `_evaluate_cached_data(prep_chain, n_features, band_method=None)` 시그니처. Preloads all base data once (`_prepare_base_data`), then passes `trial_callback` to `OptimizationService.run_optimization()`. `_prepare_base_data` uses `ProcessingService.get_base_data()` (mask + ref only, no prep chain). <!-- AI가 수정함: band_methods 다중 지원, _total_trials 3D 계산, _evaluate_cached_data 시그니처 -->
+
+### `experiment_runner.py` — `ExperimentRunner` (순수 Python 클래스, QObject 아님) <!-- AI가 수정함: 4D 탐색 공간 추가 -->
+
+```python
+run_grid(
+    band_methods: list[str],
+    n_bands_list: list[int],
+    model_types: list[str],
+    gap_range: tuple[int,int] = (1, 40),  # SimpleDeriv 있을 때만 탐색
+    stop_flag: threading.Event = None,
+) → list[dict]
+```
+
+**4D 전체 탐색:** `band_method × n_bands × gap × model_type`. SimpleDeriv 감지: prep_chain에 `_TARGET_KEYS` step이 있으면 `gap_range` 전체 탐색, 없으면 `gap_list = [0]`. `_prep_cache` 딕셔너리로 gap별 전처리 결과 캐시.
+
+**15컬럼 CSV:** `_CSV_FIELDNAMES` — `band_method, n_bands, gap(index 3), model_type, train_acc, test_acc, f1, ...`
+
+**PNG prefix:** `g{gap_val}_` (gap 포함 파일명 구분).
+
+**4레벨 stop 전파:** `stop_flag` 체크가 method → n_bands → gap → model_type 4중 루프 전체에서 동작.
+
+**`_best_per_bm_mt(results, metric="test_acc") → (best_results, best_config_map)`** (static):
+- `(band_method, model_type)` 조합별 metric 최고 trial 1개 선택, 에러 trial 자동 제외.
+
+**`_write_paper_summary()`:** `_best_results` 기반 heatmap 3개 + "Best Configuration per (Band Method, Model)" 테이블 포함. <!-- AI가 수정함: 4D 시그니처, gap 조건부, 15컬럼, _best_per_bm_mt, Best Config 테이블 명시 -->
+
+**⚠️ CRITICAL:** `ExperimentRunner`는 순수 Python 클래스. `QObject` 상속 금지. UI/VM import 금지.
+
+### `experiment_worker.py` — `ExperimentWorker(QObject)` <!-- AI가 수정함: n_bands_list/gap_range 파라미터 반영 -->
+**Signals:** `progress_update(int)`, `log_message(str)`, `training_finished(bool)`, `base_data_ready(object, object)`
+
+`params` dict에서 `n_bands_list` (없으면 `n_bands` 단일값 폴백) + `gap_range=(1,1)` 읽음. `_total_trials_est = len(band_methods) × len(n_bands_list) × gap_count × len(model_types)`. `[Trial]` 로그 prefix 감지 → `progress_update.emit`. 중복 CM(confusion matrix) 블록 없음 — `ExperimentRunner.run_grid`가 per-trial CM 저장. <!-- AI가 수정함: n_bands_list backward compat, gap_range, 진행률 emit 방식 명시 -->
 
 ## CACHE HANDSHAKE (CRITICAL)
 

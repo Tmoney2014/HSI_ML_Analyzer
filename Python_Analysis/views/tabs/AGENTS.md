@@ -8,7 +8,7 @@
 |------|-----------|-----|-------|
 | `tab_data.py` | `ClassListWidget`, `TabData` | 398 | `MainViewModel` | <!-- AI가 수정함: LOC 418→398 (실측값) -->
 | `tab_analysis.py` | `TabAnalysis` | 610 | `MainViewModel` + `AnalysisViewModel` | <!-- AI가 수정함: LOC 652→610 (실측값) -->
-| `tab_training.py` | `TabTraining` | 316 | `TrainingViewModel` | <!-- AI가 수정함: LOC 305→316 (실측값) -->
+| `tab_training.py` | `TabTraining` | 675 | `TrainingViewModel` | <!-- AI가 수정함: LOC 316→675 (4D 탐색 UI 확장) -->
 
 ---
 
@@ -79,13 +79,21 @@ Blocks signals, updates threshold + prep list checked/param state, calls `update
 
 ---
 
-## tab_training.py
+## tab_training.py <!-- AI가 수정함: 4D 탐색 UI 확장 반영 -->
 
 ### Key state
 ```python
 self.vm: TrainingViewModel
 self.tree_files: QTreeWidget    # groups as top-level, files as children with checkboxes
 self.log_text: QTextEdit        # green-on-black console style
+# Optimize 섹션
+self.lbl_spa_greedy_warning: QLabel        # SPA-LDA Greedy 느림 경고
+# Experiment 섹션
+self.list_experiment_n_bands: QListWidget  # 체크박스 목록 (5,10,15,20,25,30,35,40)
+self.spin_experiment_gap_min: QSpinBox     # gap 탐색 최솟값
+self.spin_experiment_gap_max: QSpinBox     # gap 탐색 최댓값
+self.lbl_experiment_spa_greedy_warning: QLabel  # Experiment SPA-LDA Greedy 경고
+self.lbl_experiment_gap_disabled: QLabel   # SimpleDeriv 없을 때 gap 비활성 안내
 ```
 
 ### init_from_vm_state() — VM→UI sync (called by MainWindow on load/new)
@@ -93,6 +101,8 @@ Blocks all widget signals during sync to prevent `_on_ui_changed` feedback loop:
 ```python
 self.blockSignals(True)
 # set txt_folder, txt_name, txt_desc, combo_model, spin_ratio, spin_bands from vm props
+# _restore_checked_n_bands(vm.experiment_n_bands_list)
+# spin_experiment_gap_min/max from vm.experiment_gap_min/max
 self.blockSignals(False)
 self.refresh_file_tree()
 ```
@@ -100,6 +110,20 @@ self.refresh_file_tree()
 ### _on_ui_changed() — UI→VM sync
 Connected to: `txt_name.textChanged`, `txt_desc.textChanged`, `combo_model.currentIndexChanged`, `spin_ratio.valueChanged`, `spin_bands.valueChanged`.
 Writes directly to `vm.output_folder/model_name/model_desc/model_type/val_ratio/n_features` → emits `vm.config_changed` → triggers debounced auto-save in `MainWindow`.
+
+### _on_band_method_changed() <!-- AI가 수정함: 신규 핸들러 -->
+`combo_band_method.currentIndexChanged` 연결. `spa_lda_greedy` 선택 시 `lbl_spa_greedy_warning` 표시.
+
+### _update_gap_widgets_enabled() <!-- AI가 수정함: 신규 핼퍼 -->
+현재 prep_chain(`analysis_vm.prep_chain`)에 `SimpleDeriv`가 있는지 감지.
+- 있으면: `spin_experiment_gap_min/max` 활성, `lbl_experiment_gap_disabled` 숨김
+- 없으면: spinbox 비활성(value=0), `lbl_experiment_gap_disabled` 표시
+
+### _update_experiment_summary() <!-- AI가 수정함: 신규 핼퍼 -->
+4D trial 수 공식: `len(checked_band_methods) × len(checked_n_bands) × gap_count × len(checked_model_types)` 을 요약 레이블에 표시.
+
+### _get_checked_n_bands() / _restore_checked_n_bands(n_bands_list) <!-- AI가 수정함: 신규 핼퍼 -->
+`list_experiment_n_bands`의 체크된 항목을 `list[int]`로 반환 / 복원.
 
 ### refresh_file_tree()
 Reads `vm.main_vm.file_groups` → builds `QTreeWidget` with tristate group nodes.
@@ -109,11 +133,12 @@ Files in `vm.excluded_files` → unchecked; others → checked.
 File checkboxes only (items with `Qt.UserRole` path set).
 `unchecked` → `vm.set_file_excluded(path, True)`; `checked` → `vm.set_file_excluded(path, False)`.
 
-### Training / Optimization flow
+### Training / Optimization / Experiment flow <!-- AI가 수정함: Experiment 항목 추가 -->
 - `on_start_click()` → clears log → `vm.run_training()` (no args — VM is source of truth)
 - `on_optimize_click()` → clears log → `vm.run_optimization()`
-- Both disable buttons via `set_buttons_enabled(False)` during run
-- `on_finished(success)`: re-enables buttons; if `vm.best_n_features` is set **and** `vm.band_selection_method != 'full'`, syncs `spin_bands` and clears it (one-shot); Full Band 모드에서는 spinner 갱신 건너뜀 <!-- AI가 수정함: Full Band 모드 guard 추가 -->
+- `on_export_click()` → `_get_checked_n_bands()` + `spin_experiment_gap_min/max` 수집 → `vm.run_experiment_grid(n_bands_list=..., gap_min=..., gap_max=...)` <!-- AI가 수정함: Experiment 실행 흐름 추가 -->
+- All three disable buttons via `set_buttons_enabled(False)` during run
+- `on_finished(success)`: re-enables buttons; if `vm.best_n_features` is set **and** `vm.band_selection_method != 'full'`, syncs `spin_bands` and clears it (one-shot); Full Band 모드에서는 spinner 갱신 건너뜀; `vm.best_band_method` 가 있으면 `combo_band_method` 자동 업데이트 후 클리어 (one-shot) <!-- AI가 수정함: best_band_method 소비 로직 추가 -->
 
 ### Signals consumed
 - `vm.log_message` → `append_log(msg)` (green console)

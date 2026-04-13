@@ -10,7 +10,7 @@ views/
 ├── tabs/
 │   ├── tab_data.py                 # Group/file management, ref setup, mode toggle
 │   ├── tab_analysis.py             # Spectrum viz, preprocessing config (610 lines) <!-- AI가 수정함: LOC 651→610 -->
-│   └── tab_training.py             # Training config, log, file tree
+│   └── tab_training.py             # Training config, log, file tree, Experiment 4D UI (675 lines) <!-- AI가 수정함: LOC 316→675 -->
 ├── components/
 │   ├── image_viewer.py             # Single-file HSI image + pixel spectrum viewer
 │   └── custom_toolbar.py           # Matplotlib toolbar subclass (16 lines)
