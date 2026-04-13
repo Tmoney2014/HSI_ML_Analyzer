@@ -152,6 +152,9 @@ class OptimizationService(QObject):
 
         self.log_message.emit("\n".join(report))
 
+        # n_bands × band_method 요약 테이블을 로그에도 출력  # AI가 수정함: 로그 요약 테이블 추가
+        self._emit_n_bands_summary_log(history)
+
         if output_dir is not None:  # AI가 수정함: output_dir이 있을 때만 파일 저장
             os.makedirs(output_dir, exist_ok=True)  # AI가 수정함: 저장 폴더 보장
             csv_path = os.path.join(output_dir, "optimization_history.csv")  # AI가 수정함: CSV 경로
@@ -176,7 +179,11 @@ class OptimizationService(QObject):
                         "status": "ok",  # AI가 수정함: 상태 고정
                     })  # AI가 수정함: row 종료
             with open(json_path, "w", encoding="utf-8") as f:  # AI가 수정함: JSON 기록 시작
-                f.write(json.dumps(best_params, ensure_ascii=False, indent=2))  # AI가 수정함: best params 저장
+                def _json_default(obj):  # AI가 수정함: set → list 직렬화 (excluded_files 등)
+                    if isinstance(obj, set):
+                        return sorted(obj)
+                    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+                f.write(json.dumps(best_params, ensure_ascii=False, indent=2, default=_json_default))  # AI가 수정함: set 직렬화 대응
 
             # n_bands별 최대 test_acc 요약 테이블 → _summary.md  # AI가 수정함: n_bands 비교 요약 추가
             self._write_n_bands_summary_md(output_dir, history)  # AI가 수정함: MD 요약 저장
@@ -188,53 +195,123 @@ class OptimizationService(QObject):
 
         행 = band_method (알파벳 순),
         열 = n_bands (숫자 오름차순, 'full' 맨 뒤),
-        셀 = max test_acc (%) — 해당 조합이 없으면 '-'.
+        셀 = "최대 acc% (gap=N)" — 해당 조합이 없으면 '-'.
         """
-        import os  # AI가 수정함: 로컬 import (이미 상위 _generate_report에서 import 됐으나 메서드 독립성 보장)
+        import os  # AI가 수정함: 메서드 독립성 보장
 
-        # 1. 집계: (band_method, n_bands_label) → max acc  # AI가 수정함: 집계 로직
-        agg = {}  # AI가 수정함: {(band_method, n_bands_label): max_acc}
-        for params, acc in history:  # AI가 수정함: history 순회
-            bm = params.get("band_selection_method", "unknown")  # AI가 수정함: band method 추출
-            if bm == "full":  # AI가 수정함: full band → 레이블 "full"
-                nb_label = "full"
-            else:
-                nb_label = str(params.get("n_features", "?"))  # AI가 수정함: 정수 → 문자열
-            key = (bm, nb_label)  # AI가 수정함: 집계 키
-            if key not in agg or acc > agg[key]:  # AI가 수정함: 최댓값 유지
-                agg[key] = acc
+        # 1. 집계: (band_method, n_bands_label) → (max_acc, best_gap)  # AI가 수정함: best_gap 추가
+        agg = {}  # AI가 수정함: {(band_method, n_bands_label): (max_acc, best_gap)}
+        for params, acc in history:
+            bm = params.get("band_selection_method", "unknown")
+            nb_label = "full" if bm == "full" else str(params.get("n_features", "?"))
+            # gap 추출
+            gap_val = 0
+            for s in params.get("prep", []):
+                if s.get("name") in _TARGET_KEYS:
+                    gap_val = s.get("params", {}).get("gap", 0)
+                    break
+            key = (bm, nb_label)
+            if key not in agg or acc > agg[key][0]:  # AI가 수정함: 최대 acc 갱신 시 gap도 함께 저장
+                agg[key] = (acc, gap_val)
 
-        if not agg:  # AI가 수정함: 데이터 없으면 저장 생략
+        if not agg:
             return
 
-        # 2. 고유 band_methods / n_bands 목록 정렬  # AI가 수정함: 축 정렬
-        band_methods = sorted({k[0] for k in agg})  # AI가 수정함: 알파벳 순
-        raw_nb = {k[1] for k in agg}  # AI가 수정함: n_bands 레이블 집합
-        numeric_nb = sorted([nb for nb in raw_nb if nb != "full"], key=lambda x: int(x))  # AI가 수정함: 숫자 오름차순
-        n_bands_cols = numeric_nb + (["full"] if "full" in raw_nb else [])  # AI가 수정함: full 맨 뒤
+        # 2. 축 정렬
+        band_methods = sorted({k[0] for k in agg})
+        raw_nb = {k[1] for k in agg}
+        numeric_nb = sorted([nb for nb in raw_nb if nb != "full"], key=lambda x: int(x))
+        n_bands_cols = numeric_nb + (["full"] if "full" in raw_nb else [])
 
-        # 3. Markdown 테이블 생성  # AI가 수정함: MD 렌더링
-        header = "| Band Method | " + " | ".join(n_bands_cols) + " |"  # AI가 수정함: 헤더 행
-        separator = "| --- | " + " | ".join(["---"] * len(n_bands_cols)) + " |"  # AI가 수정함: 구분선
-        rows = []  # AI가 수정함: 데이터 행 목록
-        for bm in band_methods:  # AI가 수정함: band_method 행 순회
-            cells = []  # AI가 수정함: 셀 값 목록
-            for nb in n_bands_cols:  # AI가 수정함: n_bands 열 순회
-                val = agg.get((bm, nb))  # AI가 수정함: 해당 조합의 최대 acc
-                cells.append(f"{val:.2f}%" if val is not None else "-")  # AI가 수정함: 포맷 또는 '-'
-            rows.append(f"| {bm} | " + " | ".join(cells) + " |")  # AI가 수정함: 행 완성
+        # 3. Markdown 테이블 생성  # AI가 수정함: 셀 = "acc% (gap=N)"
+        header = "| Band Method | " + " | ".join(n_bands_cols) + " |"
+        separator = "| --- | " + " | ".join(["---"] * len(n_bands_cols)) + " |"
+        rows = []
+        for bm in band_methods:
+            cells = []
+            for nb in n_bands_cols:
+                entry = agg.get((bm, nb))
+                if entry is None:
+                    cells.append("-")
+                else:
+                    acc, gap = entry
+                    cell = f"{acc:.2f}%"
+                    if gap and gap > 0:  # AI가 수정함: gap 0이면 표시 생략 (SimpleDeriv 없는 경우)
+                        cell += f" (gap={gap})"
+                    cells.append(cell)
+            rows.append(f"| {bm} | " + " | ".join(cells) + " |")
 
-        lines = [  # AI가 수정함: MD 파일 전체 내용
+        lines = [
             "# Optimization Summary — Best Test Accuracy by n_bands",
             "",
-            "행: Band Selection Method | 열: n_bands | 셀: 최대 Test Accuracy (gap 무관)",
+            "행: Band Selection Method | 열: n_bands | 셀: 최대 Test Accuracy (해당 n_bands에서 가장 좋은 gap)",
             "",
             header,
             separator,
         ] + rows + [""]
 
-        md_path = os.path.join(output_dir, "optimization_summary.md")  # AI가 수정함: 저장 경로
-        with open(md_path, "w", encoding="utf-8") as f:  # AI가 수정함: MD 파일 저장
-            f.write("\n".join(lines))  # AI가 수정함: 줄바꿈 연결 후 쓰기
+        md_path = os.path.join(output_dir, "optimization_summary.md")
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+    def _emit_n_bands_summary_log(self, history):  # AI가 수정함: 완료 시 로그에 n_bands 비교 테이블 출력
+        """
+        history에서 (band_method, n_bands) 조합별 최대 test_acc + 그때의 gap을
+        콘솔 로그에 테이블 형태로 출력한다.
+
+        셀 = "acc% (gap=N)" — gap=0 이면 "(gap=0)" 생략.
+        """
+        # 1. 집계
+        agg = {}  # {(band_method, nb_label): (max_acc, best_gap)}
+        for params, acc in history:
+            bm = params.get("band_selection_method", "unknown")
+            nb_label = "full" if bm == "full" else str(params.get("n_features", "?"))
+            gap_val = 0
+            for s in params.get("prep", []):
+                if s.get("name") in _TARGET_KEYS:
+                    gap_val = s.get("params", {}).get("gap", 0)
+                    break
+            key = (bm, nb_label)
+            if key not in agg or acc > agg[key][0]:
+                agg[key] = (acc, gap_val)
+
+        if not agg:
+            return
+
+        # 2. 축 정렬
+        band_methods = sorted({k[0] for k in agg})
+        raw_nb = {k[1] for k in agg}
+        numeric_nb = sorted([nb for nb in raw_nb if nb != "full"], key=lambda x: int(x))
+        n_bands_cols = numeric_nb + (["full"] if "full" in raw_nb else [])
+
+        # 3. 텍스트 테이블 렌더링  # AI가 수정함: 로그용 고정폭 테이블
+        col_w = 16  # 셀 너비
+        bm_w = 14   # Band Method 열 너비
+
+        header_cells = [nb.center(col_w) for nb in n_bands_cols]
+        header_line = "Band Method".ljust(bm_w) + " | " + " | ".join(header_cells)
+        sep_line = "-" * bm_w + "-+-" + "-+-".join(["-" * col_w] * len(n_bands_cols))
+
+        rows = []
+        for bm in band_methods:
+            cells = []
+            for nb in n_bands_cols:
+                entry = agg.get((bm, nb))
+                if entry is None:
+                    cells.append("-".center(col_w))
+                else:
+                    acc, gap = entry
+                    cell = f"{acc:.2f}%"
+                    if gap and gap > 0:
+                        cell += f"(g{gap})"
+                    cells.append(cell.center(col_w))
+            rows.append(bm.ljust(bm_w) + " | " + " | ".join(cells))
+
+        lines = (
+            ["\n📊 Best Accuracy per (Band Method × n_bands)", sep_line, header_line, sep_line]
+            + rows
+            + [sep_line]
+        )
+        self.log_message.emit("\n".join(lines))
 
 
