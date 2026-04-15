@@ -98,53 +98,57 @@ class OptimizationService(QObject):
 
         self.log_message.emit("-" * 40)
         self.log_message.emit(f"🏆 Optimization Done. Best: {best_acc:.2f}%")
-        
-        # 4. Final Report
-        self._generate_report(best_params, best_acc, history)  # AI가 수정함: output_dir=None 기본 동작 유지
-        
+
         return best_params, history
 
-    def _generate_report(self, best_params, current_acc, history, output_dir=None):  # AI가 수정함: output_dir 인자 추가
-        """Generate final optimization report."""  # AI가 수정함: 파일 저장 옵션 지원
-        import csv, json, os  # AI가 수정함: CSV/JSON 저장용 모듈
+    def _generate_report(self, best_params, current_acc, history, output_dir=None, meta=None):  # AI가 수정함: meta dict 추가
+        """Generate final optimization report.
+        meta: optional dict with keys model_type, file_groups, total_pixels
+        """
+        import csv, os
+
+        # AI가 수정함: full 밴드 trial 제외 — Final Config / Top3는 선택적 밴드 결과만 표시
+        non_full_history = [(p, a) for p, a in history if p.get("band_selection_method") != "full"]
+        # best non-full 결과 계산 (없으면 전체 history 폴백)
+        if non_full_history:
+            best_non_full_params, best_non_full_acc = max(non_full_history, key=lambda x: x[1])
+        else:
+            best_non_full_params, best_non_full_acc = best_params, current_acc
+
         report = ["\n🎉 Optimization Completed!", "-" * 40, "[Final Configuration]"]
-        
+
         gap_val = 0
-        for step in best_params.get('prep', []):
+        for step in best_non_full_params.get('prep', []):
             if step.get('name') in _TARGET_KEYS:
                 gap_val = step.get('params', {}).get('gap', 0)
                 break
         report.append(f" • Gap Size: {gap_val}")
+        report.append(f" • Band Count: {best_non_full_params.get('n_features')}")
+        report.append(f" • Band Method: {best_non_full_params.get('band_selection_method', '-')}")
+        report.extend(["-" * 40, f"🏆 Final Best Accuracy: {best_non_full_acc:.2f}%", "-" * 40, "📜 Top 3 Configurations"])
 
-        is_full_band = best_params.get('band_selection_method') == 'full'  # AI가 수정함: Full Band 감지
-        if is_full_band:  # AI가 수정함: Full Band이면 전체 밴드 표시
-            report.append(" • Band Count: Full Band")  # AI가 수정함:
-        else:  # AI가 수정함: SPA 등은 기존 표시 유지
-            report.append(f" • Band Count: {best_params.get('n_features')}")  # AI가 수정함:
-        report.extend(["-" * 40, f"🏆 Final Best Accuracy: {current_acc:.2f}%", "-" * 40, "📜 Top 3 Configurations"])
-        
-        # Sort by Accuracy
-        sorted_history = sorted(history, key=lambda x: x[1], reverse=True)
-        
+        # Sort non-full history by accuracy
+        sorted_history = sorted(non_full_history, key=lambda x: x[1], reverse=True)
+
         # Deduplicate (Params can be same)
         seen = set()
         unique_top = []
         for p, acc in sorted_history:
-            # Create hashable signature
             _gap = 0
             for _s in p.get('prep', []):
                 if _s.get('name') in _TARGET_KEYS:
                     _gap = _s.get('params', {}).get('gap', 0)
                     break
             sig = (p.get('band_selection_method', ''), p['n_features'], _gap)
-            
+
             if sig not in seen:
                 seen.add(sig)
                 unique_top.append((p, acc))
             if len(unique_top) >= 3: break
-            
+
         for i, (p, acc) in enumerate(unique_top):
-            info = ["Bands=Full Band" if is_full_band else f"Bands={p['n_features']}"]  # AI가 수정함: Full Band 표시
+            bm = p.get('band_selection_method', '')
+            info = [f"Method={bm}", f"Bands={p['n_features']}"]
             for s in p['prep']:
                 if s['name'] in _TARGET_KEYS: info.append(f"Gap={s['params'].get('gap')}")
             medal = ["🥇", "🥈", "🥉"][i]
@@ -158,60 +162,52 @@ class OptimizationService(QObject):
         if output_dir is not None:  # AI가 수정함: output_dir이 있을 때만 파일 저장
             os.makedirs(output_dir, exist_ok=True)  # AI가 수정함: 저장 폴더 보장
             csv_path = os.path.join(output_dir, "optimization_history.csv")  # AI가 수정함: CSV 경로
-            json_path = os.path.join(output_dir, "optimization_best.json")  # AI가 수정함: JSON 경로
             with open(csv_path, "w", newline="", encoding="utf-8") as f:  # AI가 수정함: CSV 기록 시작
                 writer = csv.DictWriter(f, fieldnames=["trial_no", "band_method", "n_bands", "gap", "train_acc", "test_acc", "f1_macro", "precision_macro", "recall_macro", "gap_pct", "train_time_ms", "status"])  # AI가 수정함: 12-col schema
                 writer.writeheader()  # AI가 수정함: CSV header 출력
                 for idx, (params, acc) in enumerate(history, start=1):  # AI가 수정함: trial row 생성
                     band_method = params.get("band_selection_method", "")  # AI가 수정함: band method 추출
                     writer.writerow({  # AI가 수정함: 12개 컬럼 고정 출력
-                        "trial_no": idx,  # AI가 수정함: trial 번호
-                        "band_method": band_method,  # AI가 수정함: band method
-                        "n_bands": "full" if band_method == "full" else params.get("n_features", ""),  # AI가 수정함: full band 처리
-                        "gap": params.get("gap", 0),  # AI가 수정함: gap 기록
-                        "train_acc": "",  # AI가 수정함: future extension placeholder
-                        "test_acc": acc,  # AI가 수정함: 평가 정확도
-                        "f1_macro": "",  # AI가 수정함: future extension placeholder
-                        "precision_macro": "",  # AI가 수정함: future extension placeholder
-                        "recall_macro": "",  # AI가 수정함: future extension placeholder
-                        "gap_pct": "",  # AI가 수정함: future extension placeholder
-                        "train_time_ms": "",  # AI가 수정함: future extension placeholder
-                        "status": "ok",  # AI가 수정함: 상태 고정
-                    })  # AI가 수정함: row 종료
-            with open(json_path, "w", encoding="utf-8") as f:  # AI가 수정함: JSON 기록 시작
-                def _json_default(obj):  # AI가 수정함: set → list 직렬화 (excluded_files 등)
-                    if isinstance(obj, set):
-                        return sorted(obj)
-                    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-                f.write(json.dumps(best_params, ensure_ascii=False, indent=2, default=_json_default))  # AI가 수정함: set 직렬화 대응
+                        "trial_no": idx,
+                        "band_method": band_method,
+                        "n_bands": "full" if band_method == "full" else params.get("n_features", ""),
+                        "gap": params.get("gap", 0),
+                        "train_acc": "",
+                        "test_acc": acc,
+                        "f1_macro": "",
+                        "precision_macro": "",
+                        "recall_macro": "",
+                        "gap_pct": "",
+                        "train_time_ms": "",
+                        "status": "ok",
+                    })
 
-            # n_bands별 최대 test_acc 요약 테이블 → _summary.md  # AI가 수정함: n_bands 비교 요약 추가
-            self._write_n_bands_summary_md(output_dir, history)  # AI가 수정함: MD 요약 저장
+            # n_bands별 최대 test_acc 요약 테이블 → 날짜시간 파일명 MD  # AI가 수정함: n_bands 비교 요약 추가
+            self._write_n_bands_summary_md(output_dir, history, meta=meta)  # AI가 수정함: meta 전달
 
-    def _write_n_bands_summary_md(self, output_dir, history):  # AI가 수정함: n_bands별 최대 test_acc 요약 MD 생성
+    def _write_n_bands_summary_md(self, output_dir, history, meta=None):  # AI가 수정함: meta 파라미터 추가
         """
         history에서 (band_method, n_bands) 조합별 최대 test_acc를 집계하여
-        Markdown 테이블로 저장한다.
+        날짜시간 파일명으로 Markdown 파일에 저장한다.
 
-        행 = band_method (알파벳 순),
-        열 = n_bands (숫자 오름차순, 'full' 맨 뒤),
-        셀 = "최대 acc% (gap=N)" — 해당 조합이 없으면 '-'.
+        파일명: optimization_summary_YYYYMMDD_HHMMSS.md
+        본문: 메타 헤더(모델, 샘플, 파일 목록) + 로그와 동일한 고정폭 텍스트 테이블.
         """
-        import os  # AI가 수정함: 메서드 독립성 보장
+        import os
+        from datetime import datetime
 
-        # 1. 집계: (band_method, n_bands_label) → (max_acc, best_gap)  # AI가 수정함: best_gap 추가
-        agg = {}  # AI가 수정함: {(band_method, n_bands_label): (max_acc, best_gap)}
+        # 1. 집계: (band_method, n_bands_label) → (max_acc, best_gap)
+        agg = {}
         for params, acc in history:
             bm = params.get("band_selection_method", "unknown")
             nb_label = "full" if bm == "full" else str(params.get("n_features", "?"))
-            # gap 추출
             gap_val = 0
             for s in params.get("prep", []):
                 if s.get("name") in _TARGET_KEYS:
                     gap_val = s.get("params", {}).get("gap", 0)
                     break
             key = (bm, nb_label)
-            if key not in agg or acc > agg[key][0]:  # AI가 수정함: 최대 acc 갱신 시 gap도 함께 저장
+            if key not in agg or acc > agg[key][0]:
                 agg[key] = (acc, gap_val)
 
         if not agg:
@@ -223,34 +219,62 @@ class OptimizationService(QObject):
         numeric_nb = sorted([nb for nb in raw_nb if nb != "full"], key=lambda x: int(x))
         n_bands_cols = numeric_nb + (["full"] if "full" in raw_nb else [])
 
-        # 3. Markdown 테이블 생성  # AI가 수정함: 셀 = "acc% (gap=N)"
-        header = "| Band Method | " + " | ".join(n_bands_cols) + " |"
-        separator = "| --- | " + " | ".join(["---"] * len(n_bands_cols)) + " |"
-        rows = []
+        # 3. 고정폭 텍스트 테이블 (로그와 동일 포맷)
+        col_w = 16
+        bm_w = 14
+
+        sep_line = "-" * bm_w + "-+-" + "-+-".join(["-" * col_w] * len(n_bands_cols))
+        header_cells = [nb.center(col_w) for nb in n_bands_cols]
+        header_line = "Band Method".ljust(bm_w) + " | " + " | ".join(header_cells)
+
+        table_lines = [sep_line, header_line, sep_line]
         for bm in band_methods:
             cells = []
             for nb in n_bands_cols:
                 entry = agg.get((bm, nb))
                 if entry is None:
-                    cells.append("-")
+                    cells.append("-".center(col_w))
                 else:
                     acc, gap = entry
                     cell = f"{acc:.2f}%"
-                    if gap and gap > 0:  # AI가 수정함: gap 0이면 표시 생략 (SimpleDeriv 없는 경우)
-                        cell += f" (gap={gap})"
-                    cells.append(cell)
-            rows.append(f"| {bm} | " + " | ".join(cells) + " |")
+                    if gap and gap > 0:
+                        cell += f"(g{gap})"
+                    cells.append(cell.center(col_w))
+            table_lines.append(bm.ljust(bm_w) + " | " + " | ".join(cells))
+        table_lines.append(sep_line)
 
-        lines = [
-            "# Optimization Summary — Best Test Accuracy by n_bands",
-            "",
-            "행: Band Selection Method | 열: n_bands | 셀: 최대 Test Accuracy (해당 n_bands에서 가장 좋은 gap)",
-            "",
-            header,
-            separator,
-        ] + rows + [""]
+        # 4. 메타 헤더 구성 (있는 정보만 표시)
+        meta = meta or {}
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        header_lines = [
+            f"# Optimization Summary",
+            f"",
+            f"- **Generated:** {ts}",
+        ]
+        if meta.get("model_type"):
+            header_lines.append(f"- **Model Type:** {meta['model_type']}")
+        if meta.get("total_pixels") is not None:
+            header_lines.append(f"- **Total Pixels:** {meta['total_pixels']:,}")
+        if meta.get("file_groups"):
+            header_lines.append(f"- **Classes & Files:**")
+            for class_name, files in sorted(meta["file_groups"].items()):
+                if files:
+                    file_names = ", ".join(f.split("\\")[-1].split("/")[-1] for f in sorted(files))
+                    header_lines.append(f"  - `{class_name}`: {file_names}")
+        header_lines += [
+            f"",
+            f"## Best Test Accuracy by n\\_bands",
+            f"",
+            f"> 행: Band Selection Method | 열: n\\_bands | 셀: 최대 Test Accuracy (해당 n\\_bands에서 가장 좋은 gap)",
+            f"",
+            f"```",
+        ]
 
-        md_path = os.path.join(output_dir, "optimization_summary.md")
+        lines = header_lines + table_lines + ["```", ""]
+
+        # 5. 날짜시간 파일명으로 저장
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        md_path = os.path.join(output_dir, f"optimization_summary_{timestamp}.md")
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 

@@ -115,22 +115,19 @@ def test_stop_propagation_all_3_levels():
 
 
 def test_report_gap_column_from_prep_chain():
-    """_generate_report extracts gap from prep chain, not from top-level params."""
+    """_generate_report extracts gap from prep chain and emits Gap Size line."""
     svc = _make_service()
-    params = _make_params(method='spa', with_simpledv=True)
 
     logged = []
     svc.log_message.emit = lambda msg: logged.append(msg)
 
-    def trial_callback(p):
-        return 0.75
-
-    # Run with single method, single gap to keep it fast (no_gap path)
-    # Use band_methods=['spa'] with no SimpleDeriv to force band-only (gap=0)
+    # Construct a minimal history with a non-full spa trial
     params_no_gap = _make_params(method='spa', with_simpledv=False)
-    best, history = svc.run_optimization(
-        params_no_gap, trial_callback, band_methods=['spa']
-    )
+    params_no_gap['n_features'] = 10
+    history = [(params_no_gap, 0.75)]
+
+    # Call _generate_report directly (worker calls it explicitly now)
+    svc._generate_report(params_no_gap, 0.75, history)
 
     # Check that report was emitted and contains Gap Size line
     full_log = '\n'.join(logged)
