@@ -453,7 +453,8 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
         반환값:
             n_bands_sorted: list — 정렬된 n_bands 레이블 (숫자 오름차순, "full" 마지막)
             row_labels: list[str] — "(band_method) / (model_type)" 행 레이블
-            matrix: list[list[float|nan]] — row_labels × n_bands_sorted 행렬
+            matrix: list[list[float|nan]] — row_labels × n_bands_sorted 행렬 (acc)
+            matrix_gap: list[list[int|None]] — 동일 shape; 각 셀의 best acc를 달성한 gap 값
         """
         # n_bands 값 수집 — 숫자는 int 변환, "full"은 문자열 그대로
         raw_n = set()
@@ -471,9 +472,11 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
 
         row_labels = [f"{bm} / {mt}" for bm in band_methods for mt in model_types]
         matrix = []
+        matrix_gap = []  # AI가 수정함: best acc 달성 시의 gap 행렬 추가
         for bm in band_methods:
             for mt in model_types:
                 row = []
+                row_gap = []
                 for nb in n_bands_sorted:
                     candidates = [
                         r for r in ok_results
@@ -482,13 +485,21 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                         and r.get("n_bands") == nb
                     ]
                     if candidates:
-                        best_val = max(float(r.get(metric_key, 0) or 0) for r in candidates)
-                        row.append(best_val)
+                        best_r = max(candidates, key=lambda r: float(r.get(metric_key, 0) or 0))
+                        row.append(float(best_r.get(metric_key, 0) or 0))
+                        # gap: int이면 그대로, 없으면 None
+                        gap_val = best_r.get("gap")
+                        try:
+                            row_gap.append(int(gap_val) if gap_val is not None else None)
+                        except (TypeError, ValueError):
+                            row_gap.append(None)
                     else:
                         row.append(np.nan)
+                        row_gap.append(None)
                 matrix.append(row)
+                matrix_gap.append(row_gap)
 
-        return n_bands_sorted, row_labels, matrix
+        return n_bands_sorted, row_labels, matrix, matrix_gap
 
     @staticmethod
     def _write_n_bands_heatmap_png(exp_dir, n_bands_sorted, row_labels, matrix, metric_key, title, file_stem, log_callback):
@@ -619,21 +630,28 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                     rows = self._build_metric_matrix(ok_results, band_methods, model_types, metric_key)
                     self._write_markdown_table(f, ["Band Method", *model_types], rows)
 
-                # AI가 수정함: n_bands별 비교 테이블 (행=band_method/model_type, 열=n_bands, 셀=max test_acc)
-                n_bands_sorted, row_labels, nb_matrix = self._build_n_bands_matrix(
+                # AI가 수정함: n_bands별 비교 테이블 (행=band_method/model_type, 열=n_bands, 셀=acc%(gap=N))
+                n_bands_sorted, row_labels, nb_matrix, nb_matrix_gap = self._build_n_bands_matrix(
                     ok_results, band_methods, model_types, metric_key="test_acc"
                 )
                 if n_bands_sorted:
                     f.write("## Best Test Accuracy by n_bands\n\n")
-                    f.write("> 각 셀은 해당 (밴드선택/모델, n_bands) 조합에서 gap에 무관하게 가장 높은 Test Accuracy\n\n")
+                    f.write("> 각 셀은 해당 (밴드선택/모델, n_bands) 조합에서 가장 높은 Test Accuracy와 그 gap 값\n\n")
                     table_headers = ["Band Selection / Model", *[str(nb) for nb in n_bands_sorted]]
-                    table_rows = [
-                        [row_labels[i]] + [
-                            f"{nb_matrix[i][j]:.4f}" if not np.isnan(nb_matrix[i][j]) else "-"
-                            for j in range(len(n_bands_sorted))
-                        ]
-                        for i in range(len(row_labels))
-                    ]
+                    table_rows = []
+                    for i in range(len(row_labels)):
+                        row_cells = [row_labels[i]]
+                        for j in range(len(n_bands_sorted)):
+                            acc = nb_matrix[i][j]
+                            gap = nb_matrix_gap[i][j]
+                            if np.isnan(acc):
+                                row_cells.append("-")
+                            else:
+                                cell = f"{acc * 100:.2f}%"
+                                if gap is not None and gap > 0:
+                                    cell += f" (gap={gap})"
+                                row_cells.append(cell)
+                        table_rows.append(row_cells)
                     self._write_markdown_table(f, table_headers, table_rows)
 
                 # AI가 수정함: per-trial confusion matrix 참조 섹션
@@ -668,7 +686,7 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
             self._write_heatmap_png(exp_dir, _best_results, band_methods, model_types, "f1_macro", "Macro F1 Matrix", f"{csv_timestamp}_paper_matrix_f1_macro", log_callback)
             self._write_heatmap_png(exp_dir, _best_results, band_methods, model_types, "train_time_ms", "Train Time Matrix (ms)", f"{csv_timestamp}_paper_matrix_train_time_ms", log_callback)
             # AI가 수정함: n_bands별 비교 heatmap (행=band_method/model_type, 열=n_bands)
-            n_bands_sorted, row_labels, nb_matrix = self._build_n_bands_matrix(
+            n_bands_sorted, row_labels, nb_matrix, _nb_matrix_gap = self._build_n_bands_matrix(
                 ok_results, band_methods, model_types, metric_key="test_acc"
             )
             if n_bands_sorted:

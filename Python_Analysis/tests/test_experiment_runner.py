@@ -314,52 +314,57 @@ def test_paper_summary_best_config_table(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_n_bands_matrix_basic():
-    """_build_n_bands_matrix: 기본 집계 — 동일 (bm, mt, n_bands)에서 max test_acc 선택."""
+    """_build_n_bands_matrix: 기본 집계 — 동일 (bm, mt, n_bands)에서 max test_acc 선택 + best gap 반환."""
     ok_results = [
-        {"band_method": "spa", "model_type": "LDA", "n_bands": 5,  "test_acc": 0.80, "status": "ok"},
-        {"band_method": "spa", "model_type": "LDA", "n_bands": 5,  "test_acc": 0.85, "status": "ok"},  # max=0.85
-        {"band_method": "spa", "model_type": "LDA", "n_bands": 10, "test_acc": 0.90, "status": "ok"},
-        {"band_method": "anova_f", "model_type": "LDA", "n_bands": 5,  "test_acc": 0.70, "status": "ok"},
-        {"band_method": "anova_f", "model_type": "LDA", "n_bands": 10, "test_acc": 0.75, "status": "ok"},
+        {"band_method": "spa", "model_type": "LDA", "n_bands": 5,  "test_acc": 0.80, "gap": 1, "status": "ok"},
+        {"band_method": "spa", "model_type": "LDA", "n_bands": 5,  "test_acc": 0.85, "gap": 2, "status": "ok"},  # max=0.85, gap=2
+        {"band_method": "spa", "model_type": "LDA", "n_bands": 10, "test_acc": 0.90, "gap": 3, "status": "ok"},
+        {"band_method": "anova_f", "model_type": "LDA", "n_bands": 5,  "test_acc": 0.70, "gap": 1, "status": "ok"},
+        {"band_method": "anova_f", "model_type": "LDA", "n_bands": 10, "test_acc": 0.75, "gap": 4, "status": "ok"},
     ]
     band_methods = ["spa", "anova_f"]
     model_types = ["LDA"]
-    n_bands_sorted, row_labels, matrix = ExperimentRunner._build_n_bands_matrix(
+    n_bands_sorted, row_labels, matrix, matrix_gap = ExperimentRunner._build_n_bands_matrix(
         ok_results, band_methods, model_types, metric_key="test_acc"
     )
 
     assert n_bands_sorted == [5, 10], f"Expected [5, 10], got {n_bands_sorted}"
     assert row_labels == ["spa / LDA", "anova_f / LDA"]
 
-    # spa/LDA: n_bands=5 → max(0.80, 0.85)=0.85, n_bands=10 → 0.90
+    # spa/LDA: n_bands=5 → max(0.80, 0.85)=0.85 at gap=2, n_bands=10 → 0.90 at gap=3
     assert abs(matrix[0][0] - 0.85) < 1e-9
     assert abs(matrix[0][1] - 0.90) < 1e-9
+    assert matrix_gap[0][0] == 2, f"Expected gap=2 for spa/LDA/n=5, got {matrix_gap[0][0]}"
+    assert matrix_gap[0][1] == 3, f"Expected gap=3 for spa/LDA/n=10, got {matrix_gap[0][1]}"
     # anova_f/LDA: n_bands=5 → 0.70, n_bands=10 → 0.75
     assert abs(matrix[1][0] - 0.70) < 1e-9
     assert abs(matrix[1][1] - 0.75) < 1e-9
+    assert matrix_gap[1][0] == 1
+    assert matrix_gap[1][1] == 4
 
 
 def test_n_bands_matrix_missing_combination_is_nan():
-    """_build_n_bands_matrix: 해당 조합 없으면 nan."""
+    """_build_n_bands_matrix: 해당 조합 없으면 nan, matrix_gap은 None."""
     import math
     ok_results = [
-        {"band_method": "spa", "model_type": "LDA", "n_bands": 5, "test_acc": 0.80, "status": "ok"},
+        {"band_method": "spa", "model_type": "LDA", "n_bands": 5, "test_acc": 0.80, "gap": 1, "status": "ok"},
     ]
-    n_bands_sorted, row_labels, matrix = ExperimentRunner._build_n_bands_matrix(
+    n_bands_sorted, row_labels, matrix, matrix_gap = ExperimentRunner._build_n_bands_matrix(
         ok_results, ["spa", "anova_f"], ["LDA"], metric_key="test_acc"
     )
-    # anova_f / LDA / n_bands=5 → missing → nan
+    # anova_f / LDA / n_bands=5 → missing → nan / None
     assert math.isnan(matrix[1][0]), "Expected NaN for missing (anova_f, LDA, 5)"
+    assert matrix_gap[1][0] is None, "Expected None gap for missing combination"
 
 
 def test_n_bands_matrix_full_band_sorted_last():
     """_build_n_bands_matrix: 'full' 문자열 n_bands는 숫자 뒤에 정렬."""
     ok_results = [
-        {"band_method": "spa", "model_type": "LDA", "n_bands": 10,     "test_acc": 0.80, "status": "ok"},
-        {"band_method": "spa", "model_type": "LDA", "n_bands": "full",  "test_acc": 0.88, "status": "ok"},
-        {"band_method": "spa", "model_type": "LDA", "n_bands": 5,      "test_acc": 0.75, "status": "ok"},
+        {"band_method": "spa", "model_type": "LDA", "n_bands": 10,     "test_acc": 0.80, "gap": 1, "status": "ok"},
+        {"band_method": "spa", "model_type": "LDA", "n_bands": "full",  "test_acc": 0.88, "gap": 0, "status": "ok"},
+        {"band_method": "spa", "model_type": "LDA", "n_bands": 5,      "test_acc": 0.75, "gap": 2, "status": "ok"},
     ]
-    n_bands_sorted, _, _ = ExperimentRunner._build_n_bands_matrix(
+    n_bands_sorted, _, _, _ = ExperimentRunner._build_n_bands_matrix(
         ok_results, ["spa"], ["LDA"], metric_key="test_acc"
     )
     assert n_bands_sorted[-1] == "full", f"'full' should be last, got {n_bands_sorted}"
