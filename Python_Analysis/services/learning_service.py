@@ -321,7 +321,7 @@ class LearningService:
 
     # ----------------------------------------
 
-    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None, mean_spectrum=None, spa_scores=None, metrics=None, model_name="model", description="", total_bands=None):
+    def export_model(self, model, selected_bands, output_path, preprocessing_config=None, processing_mode="Raw", mask_rules=None, label_map=None, colors_map=None, exclude_rules=None, threshold=None, mean_spectrum=None, spa_scores=None, metrics=None, model_name="model", description="", total_bands=None, band_method=None, class_mean_spectra=None, exclude_indices_processed=None):  # AI가 수정함: band_method 추가 — importance plot 타이틀/레이블 반영용; class_mean_spectra 추가 — 클래스별 스펙트럼 시각화; exclude_indices_processed 추가 — processed 기준 shading
         """
         Export model to JSON for C#.
         Handles SVM, PLS-DA, and LDA (Linear Only).
@@ -527,9 +527,9 @@ class LearningService:
         print(f"   [LearningService] Model exported to {output_path}")
         
         # Generate Feature Importance Plot
-        self._generate_importance_plot(weights, selected_bands, output_path, label_map, mean_spectrum, spa_scores, exclude_rules, band_method=None)
+        self._generate_importance_plot(weights, selected_bands, output_path, label_map, mean_spectrum, spa_scores, exclude_rules, band_method=band_method, class_mean_spectra=class_mean_spectra, exclude_indices_processed=exclude_indices_processed)  # AI가 수정함: exclude_indices_processed 전달 — processed 기준 shading
 
-    def _generate_importance_plot(self, weights, bands, output_path, label_map, mean_spectrum=None, spa_scores=None, exclude_rules=None, band_method=None):
+    def _generate_importance_plot(self, weights, bands, output_path, label_map, mean_spectrum=None, spa_scores=None, exclude_rules=None, band_method=None, class_mean_spectra=None, exclude_indices_processed=None):  # AI가 수정함: exclude_indices_processed 추가 — processed 기준 shading으로 교체
         try:
             if plt is None:  # AI가 수정함: matplotlib 미설치 시 플롯 생성을 건너뜀
                 print("   [LearningService] Matplotlib unavailable; skipping importance plot.")  # AI가 수정함: 스킵 로그 출력
@@ -541,43 +541,90 @@ class LearningService:
             plt.style.use('default') 
             
             fig, ax1 = plt.subplots(figsize=(12, 6))
-            
+
+            # AI가 수정함: method별 Y축 레이블 / 제목 / 후보 바 표시 여부 결정
+            _method = band_method or 'spa'
+            _METHOD_META = {
+                'spa':           ("SPA Selectivity Score",          "SPA Algorithm"),
+                'full':          ("Band Variance",                   "Full Band"),
+                'anova_f':       ("ANOVA F-Statistic",               "ANOVA-F"),
+                'lda_coef':      ("LDA Coefficient Importance",      "LDA-coef"),
+                'spa_lda_fast':  ("SPA-LDA Importance",              "SPA-LDA Fast"),
+                'spa_lda_greedy':("SPA-LDA Greedy Score",            "SPA-LDA Greedy"),
+            }
+            _ylabel, _method_label = _METHOD_META.get(_method, ("Band Score", _method.upper()))
+            # Supervised methods: spa_scores covers all bands → show as full-band score bar
+            # Unsupervised SPA: spa_scores are per-candidate, blue bar makes sense
+            _show_candidate_bars = (_method == 'spa') and (spa_scores is not None and len(spa_scores) > 0)
+
             # --- 1. Background: Excluded Regions (Shading) ---
             # Do this first so it's behind everything
-            if exclude_rules:
-                import matplotlib.patches as mpatches
+            # AI가 수정함: processed feature 인덱스 기준 shading — raw 문자열 파싱 대신 processed 0-based 인덱스 직접 사용
+            # exclude_indices_processed 없으면 exclude_rules(raw 문자열) 폴백 유지 (하위 호환)
+            if exclude_indices_processed is not None and len(exclude_indices_processed) > 0:
+                # 연속 구간은 axvspan 하나로 합쳐 렌더링 효율 개선
+                sorted_excl = sorted(set(exclude_indices_processed))
+                runs = []  # [(start, end), ...]
+                for idx in sorted_excl:
+                    if runs and idx == runs[-1][1] + 1:
+                        runs[-1] = (runs[-1][0], idx)
+                    else:
+                        runs.append((idx, idx))
+                for s, e in runs:
+                    ax1.axvspan(s - 0.5, e + 0.5, color='#E0E0E0', alpha=0.5, zorder=0)
+            elif exclude_rules:
                 try:
                     for part in exclude_rules.split(','):
                         part = part.strip()
                         if not part: continue
                         if '-' in part:
                             start, end = map(int, part.split('-'))
-                            # UI 1-based -> Plot 0-based
+                            # UI 1-based -> Plot 0-based (fallback: raw 기준 — 전처리 없을 때만 정확)
                             ax1.axvspan(start-1, end, color='#E0E0E0', alpha=0.5, zorder=0)
                         else:
                             idx = int(part) - 1
                             ax1.axvspan(idx-0.5, idx+0.5, color='#E0E0E0', alpha=0.5, zorder=0)
-                    
-                    # Add dummy handle for legend
-                    # We can't easily get handle from axvspan unless saved, so create a Patch
-                    # exp_patch = mpatches.Patch(color='#E0E0E0', label='Excluded Region')
                 except Exception:  # AI가 수정함: bare except → Exception (코드 품질)
                     pass
 
-            # --- 2. Background: Mean Spectrum (Right Axis) ---
-            spec_line = None
-            if mean_spectrum is not None:
+            # --- 2. Foreground: Class Mean Spectra (Right Axis) ---
+            # AI가 수정함: 단일 global mean → 클래스별 다중 라인으로 교체
+            # class_mean_spectra 있으면 클래스별, 없으면 mean_spectrum 단일 fallback
+            spec_lines = []  # (line_handle,) list for legend
+            _CLASS_COLORS = [
+                '#E74C3C', '#3498DB', '#2ECC71', '#F39C12',
+                '#9B59B6', '#1ABC9C', '#E67E22', '#34495E',
+            ]  # 최대 8클래스 대응; 초과 시 matplotlib 기본 색상 순환
+
+            if class_mean_spectra and len(class_mean_spectra) > 0:
                 ax2 = ax1.twinx()
-                spec_line, = ax2.plot(range(len(mean_spectrum)), mean_spectrum, color='gray', linestyle='--', linewidth=1.5, label='Mean Spectrum', alpha=0.8, zorder=1)
+                ax2.set_ylabel("Intensity (DN/Ref)", color='#555555', fontsize=10)
+                ax2.tick_params(axis='y', labelcolor='#555555')
+                for i, (cname, cspec) in enumerate(sorted(class_mean_spectra.items())):
+                    color = _CLASS_COLORS[i % len(_CLASS_COLORS)]
+                    line, = ax2.plot(
+                        range(len(cspec)), cspec,
+                        color=color, linestyle='--', linewidth=1.5,
+                        label=f'{cname} (mean)', alpha=0.85, zorder=1,
+                    )
+                    spec_lines.append(line)
+            elif mean_spectrum is not None:
+                # fallback: 전체 평균 단일 라인
+                ax2 = ax1.twinx()
                 ax2.set_ylabel("Intensity (DN/Ref)", color='gray', fontsize=10)
                 ax2.tick_params(axis='y', labelcolor='gray')
+                line, = ax2.plot(
+                    range(len(mean_spectrum)), mean_spectrum,
+                    color='gray', linestyle='--', linewidth=1.5,
+                    label='Mean Spectrum', alpha=0.8, zorder=1,
+                )
+                spec_lines.append(line)
             else:
                 ax2 = None
-                
-            # --- 3. Foreground: SPA Scores (Left Axis - Blue/Red Bars) ---
-            
+
+            # --- 3. Foreground: Score Bars (Left Axis) ---
             ax1.set_xlabel("Band Index")
-            ax1.set_ylabel("Selectivity Score (SPA)", color='blue', fontsize=10)
+            ax1.set_ylabel(_ylabel, color='blue', fontsize=10)  # AI가 수정함: method별 Y축 레이블
             ax1.tick_params(axis='y', labelcolor='blue')
             
             bar_candidates = None
@@ -585,8 +632,14 @@ class LearningService:
             
             if spa_scores is not None and len(spa_scores) > 0:
                 x_all = np.arange(len(spa_scores))
-                bar_candidates = ax1.bar(x_all, spa_scores, color='skyblue', width=0.8, alpha=0.6, label='Candidate Bands', zorder=2)
-                
+
+                if _show_candidate_bars:
+                    # AI가 수정함: SPA 전용 — 후보 밴드 전체를 하늘색 바로 표시
+                    bar_candidates = ax1.bar(x_all, spa_scores, color='skyblue', width=0.8, alpha=0.6, label='Candidate Bands', zorder=2)
+                else:
+                    # AI가 수정함: supervised/full 방법 — 전체 밴드 스코어를 연한 회색 바로 표시
+                    bar_candidates = ax1.bar(x_all, spa_scores, color='#B0C4DE', width=0.8, alpha=0.5, label='All Band Scores', zorder=2)
+
                 sel_scores = []
                 for b in bands:
                     if b < len(spa_scores): sel_scores.append(spa_scores[int(b)])
@@ -594,48 +647,36 @@ class LearningService:
                         
                 bar_selected = ax1.bar(bands, sel_scores, color='red', width=0.8, alpha=1.0, label='Selected Bands', zorder=3)
                 
-                # Labels
+                # Band index labels on selected bars
                 for b, s in zip(bands, sel_scores):
                     ax1.text(b, s, str(int(b)), ha='center', va='bottom', fontsize=9, fontweight='bold', color='red', zorder=4)
                     
             else:
-                # Fallback style
+                # Fallback: show model weight magnitudes when no scores available
                 w = np.abs(np.array(weights))
                 if w.ndim == 2: w = np.max(w, axis=0) 
                 bar_selected = ax1.bar(bands, w, color='red', width=1.5, label='Importance (Coef)')
             
-            # AI가 수정함: Full Band 모드 분기 — band_method 또는 spa_scores 유무로 판단
-            _is_full_band = (band_method == 'full') or (spa_scores is None or len(spa_scores) == 0)
-            if _is_full_band:
-                plt.title(f"Band Selection Result (Full Band, Top-{len(bands)})", fontsize=12)
-            else:
-                plt.title(f"Band Selection Result (SPA Algorithm, Top-{len(bands)})", fontsize=12)
+            # AI가 수정함: method별 제목 — band_method가 None이어도 올바른 레이블 표시
+            plt.title(f"Band Selection Result ({_method_label}, Top-{len(bands)})", fontsize=12)
             plt.grid(True, axis='x', alpha=0.3)
             
             # --- Consolidated Legend ---
             handles = []
-            labels = []
             
-            if exclude_rules:
+            if (exclude_indices_processed and len(exclude_indices_processed) > 0) or exclude_rules:
                 import matplotlib.patches as mpatches
                 handles.append(mpatches.Patch(color='#E0E0E0', label='Excluded Region'))
             
             if bar_selected: handles.append(bar_selected)
             if bar_candidates: handles.append(bar_candidates)
-            if spec_line: handles.append(spec_line)
-            
-            # Extract labels manually or use helper
-            # Since we manually added items, just use their labels if object has one, OR construct
-            # Actually bar containers have labels.
+            for sl in spec_lines:  # AI가 수정함: 클래스별 스펙트럼 라인 전부 추가
+                handles.append(sl)
             
             final_handles = []
             final_labels = []
             for h in handles:
                 if hasattr(h, 'get_label'): 
-                    final_labels.append(h.get_label())
-                    final_handles.append(h)
-                else: 
-                    # If it's a Patch
                     final_labels.append(h.get_label())
                     final_handles.append(h)
 

@@ -147,6 +147,14 @@ class TrainingWorker(QObject):
                 self.log_message.emit(f"✅ Selected {band_method.upper()} Bands (Top {n_features}):")  # AI가 수정함: 동적 method 표시
                 self.log_message.emit(f"   {selected_bands_1based}")
                 self.log_message.emit("-" * 40)
+
+            # AI가 추가함: 클래스별 평균 스펙트럼 계산 (전처리 전 X 기준, 선택 밴드 이전 전체 밴드)
+            # label_map: {class_id(int): class_name(str)}
+            class_mean_spectra = {}  # {class_name: [float, ...]}
+            for cid, cname in label_map.items():
+                mask_cls = (y == cid)
+                if np.any(mask_cls):
+                    class_mean_spectra[cname] = X[mask_cls].mean(axis=0).tolist()
             
             # 4. Train Model
             if not silent: self.log_message.emit(f"Training {model_type}...")
@@ -201,6 +209,9 @@ class TrainingWorker(QObject):
                 model_name=model_name,
                 description=model_desc,
                 total_bands=self.raw_band_count,  # AI가 수정함: authoritative RAW band count 전달
+                band_method=band_method,  # AI가 수정함: band_method 전달 — importance plot 타이틀 반영용
+                class_mean_spectra=class_mean_spectra,  # AI가 추가함: 클래스별 평균 스펙트럼 전달
+                exclude_indices_processed=exclude_indices,  # AI가 추가함: processed 기준 제외 인덱스 — shading 위치 정확도
             )
             
             self.log_message.emit(f"Model exported to {output_path}")
