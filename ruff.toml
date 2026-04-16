@@ -1,0 +1,25 @@
+# ruff.toml — HSI_ML_Analyzer lint 설정
+# Brownfield baseline: 기존 위반은 아래 ignore 목록으로 제외
+# 새 코드 작성 시 이 규칙들도 적용되므로 점진적으로 ignore 항목을 줄여나갈 것
+
+line-length = 120  # 기존 코드의 긴 라인을 수용
+
+[lint]
+select = ["E", "F", "W"]
+
+# 기존 코드 pre-existing 위반 baseline
+# 수정 완료된 규칙은 이 목록에서 제거할 것
+ignore = [
+    "E501",  # line-too-long                                — pre-existing (주석 포함 긴 라인 다수)
+    "E701",  # multiple-statements-on-one-line-colon        — 108건 pre-existing
+    "E702",  # multiple-statements-on-one-line-semicolon    —   6건 pre-existing
+    "E731",  # lambda-assignment                            —   4건 pre-existing
+    "E401",  # multiple-imports-on-one-line                 —   2건 pre-existing
+    "E722",  # bare-except                                  —   2건 pre-existing
+    "W291",  # trailing-whitespace                          — pre-existing
+    "W293",  # whitespace-before-comment                    — pre-existing
+    "F401",  # unused-import                                —  32건 pre-existing (ruff --fix 로 자동 수정 가능)
+    "F541",  # f-string-missing-placeholders                —  10건 pre-existing
+    "F841",  # unused-variable                              —   7건 pre-existing
+    "F811",  # redefined-while-unused                       —   1건 pre-existing
+]
