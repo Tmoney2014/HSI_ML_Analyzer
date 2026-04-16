@@ -90,10 +90,11 @@ def test_run_grid_writes_paper_summary_artifacts(tmp_path, monkeypatch):
     if importlib.util.find_spec("matplotlib") is None:
         assert heatmap_files == []
     else:
-        assert len(heatmap_files) == 3
+        assert len(heatmap_files) == 4
         assert any(name.endswith("_paper_matrix_test_acc.png") for name in heatmap_files)
         assert any(name.endswith("_paper_matrix_f1_macro.png") for name in heatmap_files)
         assert any(name.endswith("_paper_matrix_train_time_ms.png") for name in heatmap_files)
+        assert any(name.endswith("_paper_matrix_n_bands_test_acc.png") for name in heatmap_files)
 
     # --- CSV column assertions ---
     with open(csv_files[0], newline="", encoding="utf-8") as f:
