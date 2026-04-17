@@ -270,3 +270,54 @@ class TestPLSDAShapes:
         with tempfile.TemporaryDirectory() as tmpdir:
             data = _export(model, _bands(n), total_bands=20, tmpdir=tmpdir)
         assert all(len(row) == n for row in data["Weights"])
+
+
+# ---------------------------------------------------------------------------
+# Tests — D-6  Binary Logistic Regression via train_model() (end-to-end)
+#
+# Oracle Q4 bug: _train_logistic() previously asserted coef_.shape[0] == n_classes,
+# which always failed for binary LogReg (sklearn stores 1 row, not 2).
+# This test validates the full train_model() → export path succeeds for binary.
+#
+# AI가 추가함: Binary LogReg train_model() 엔드투엔드 성공 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestLogisticRegressionBinaryTrainModel:
+
+    def test_binary_train_model_succeeds_without_assertion_error(self):
+        """train_model() must not raise AssertionError for binary Logistic Regression."""
+        n = 8
+        X, y = _binary_data(n)
+        svc = LearningService()
+        # Should not raise AssertionError (which was the bug: coef_.shape[0]==1 != 2)
+        model, metrics = svc.train_model(X, y, model_type="Logistic Regression")
+        assert model is not None
+        assert "TrainAccuracy" in metrics
+
+    def test_binary_train_model_export_produces_valid_shape(self):
+        """Binary LogReg export via train_model() path must yield flat Weights and scalar Bias."""
+        n = 8
+        X, y = _binary_data(n)
+        svc = LearningService()
+        model, _ = svc.train_model(X, y, model_type="Logistic Regression")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data = _export(model, _bands(n), total_bands=20, tmpdir=tmpdir)
+
+        assert data["IsMultiClass"] is False
+        weights = data["Weights"]
+        assert isinstance(weights, list)
+        assert all(isinstance(w, float) for w in weights), (
+            "Binary Weights must be list[float], not list[list]"
+        )
+        assert len(weights) == n
+        assert isinstance(data["Bias"], float)
+
+    def test_binary_train_model_returns_accuracy_in_range(self):
+        """Binary LogReg train accuracy must be in [0, 100] range."""
+        n = 8
+        X, y = _binary_data(n)
+        svc = LearningService()
+        _, metrics = svc.train_model(X, y, model_type="Logistic Regression")
+        assert 0.0 <= metrics["TrainAccuracy"] <= 100.0
+        assert 0.0 <= metrics["TestAccuracy"] <= 100.0
