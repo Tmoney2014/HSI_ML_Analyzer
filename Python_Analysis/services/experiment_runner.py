@@ -8,7 +8,7 @@ from datetime import datetime  # AI가 수정함: 타임스탬프 생성용
 import json  # AI가 수정함: selected_bands JSON 직렬화용
 
 import numpy as np  # AI가 수정함: 배열 연산용
-from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score  # AI가 수정함: 평가 지표 계산용
+from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score, classification_report  # AI가 수정함: 평가 지표 계산용
 from sklearn.model_selection import train_test_split  # AI가 수정함: stratify split용
 
 from services.processing_service import ProcessingService  # AI가 수정함: 전처리 단일 경유점
@@ -30,7 +30,8 @@ _CSV_FIELDNAMES = [  # AI가 수정함: 15컬럼 정의
     "gap_pct",             # AI가 수정함: train_acc - test_acc (과적합 지표)
     "train_time_ms",       # AI가 수정함: 학습 소요 시간 (ms)
     "selected_bands",      # AI가 수정함: 선택된 밴드 인덱스 JSON 문자열 (재현성)
-    "confusion_png_path",  # AI가 수정함: per-trial confusion matrix PNG 경로
+    "confusion_png_path",  # AI가 수정함: best trial confusion matrix PNG 경로 (best trial만 채워짐)
+    "per_class_report",    # AI가 수정함: 클래스별 precision/recall/f1 JSON 문자열 (모든 ok trial)
     "status",              # AI가 수정함: "ok" 또는 "error: {e}"
 ]  # AI가 수정함: 컬럼 목록 종료
 
@@ -81,9 +82,7 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
             return False  # AI가 수정함: 기본값 — 계속 실행
 
         # AI가 수정함: 출력 디렉토리 생성 (존재해도 에러 없음)
-        os.makedirs(output_dir, exist_ok=True)  # AI가 수정함: 디렉토리 보장
-        _exp_dir = os.path.join(output_dir, 'experiments')  # AI가 수정함: experiments 서브디렉토리 경로
-        os.makedirs(_exp_dir, exist_ok=True)  # AI가 수정함: experiments 서브디렉토리 생성
+        os.makedirs(output_dir, exist_ok=True)  # AI가 수정함: 최상위 출력 폴더 보장
 
         # AI가 수정함: 결과 누적 리스트
         results = []  # AI가 수정함: trial 결과 dict 목록
@@ -120,6 +119,11 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
 
         # AI가 수정함: 런 수준 타임스탬프 — 루프 전에 결정하여 모든 산출물 파일명 통일
         csv_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # AI가 수정함: CSV + PNG 공용 타임스탬프
+
+        # AI가 수정함: 실행마다 타임스탬프 이름의 전용 폴더 생성 → 파일 뒤섞임 방지
+        _exp_dir = os.path.join(output_dir, 'experiments', csv_timestamp)
+        os.makedirs(_exp_dir, exist_ok=True)
+        _log(f"[ExperimentRunner] Output folder: {_exp_dir}")
 
         for gap_val in _gap_list:  # AI가 수정함: gap 루프 (Level 1)
             if _should_stop():  # AI가 수정함: stop 체크
@@ -197,12 +201,36 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                                 )
 
                             # AI가 수정함: 학습된 모델로 예측 수행
-                            y_pred = model.predict(X_test_m)  # AI가 수정함: 테스트셋 예측
+                            # AI가 수정함: PLS-DA는 predict()가 회귀 출력 (N, n_classes) 반환 → argmax로 클래스 인덱스 변환
+                            y_pred_raw = np.asarray(model.predict(X_test_m))  # AI가 수정함: asarray로 sparse matrix 대응 + 타입 명확화
+                            if y_pred_raw.ndim == 2:
+                                y_pred = np.argmax(y_pred_raw, axis=1)  # AI가 수정함: PLS-DA 회귀 출력 → 클래스 인덱스
+                            else:
+                                y_pred = y_pred_raw  # AI가 수정함: 일반 분류 모델 그대로 사용
 
                             # AI가 수정함: macro 메트릭 계산 (zero_division=0 필수)
                             f1_mac = float(f1_score(y_test_m, y_pred, average='macro', zero_division=0))  # AI가 수정함: macro F1
                             prec_mac = float(precision_score(y_test_m, y_pred, average='macro', zero_division=0))  # AI가 수정함: macro precision
                             rec_mac = float(recall_score(y_test_m, y_pred, average='macro', zero_division=0))  # AI가 수정함: macro recall
+
+                            # AI가 수정함: 클래스별 precision/recall/f1 계산 → JSON 직렬화 (CSV 기록용)
+                            # output_dict=True → {클래스명: {precision, recall, f1-score, support}, "macro avg": ..., ...}
+                            # 집계 키("accuracy", "macro avg", "weighted avg")는 제외하고 클래스 엔트리만 저장
+                            _cr_raw = classification_report(y_test_m, y_pred, output_dict=True, zero_division=0)
+                            # AI가 수정함: sklearn stub이 classification_report 반환 타입을 str로 추론 → isinstance로 타입 확정
+                            _per_class = {}
+                            if isinstance(_cr_raw, dict):
+                                _per_class = {
+                                    str(k): {
+                                        "precision": round(float(v["precision"]), 4),
+                                        "recall": round(float(v["recall"]), 4),
+                                        "f1": round(float(v["f1-score"]), 4),
+                                        "support": int(v["support"]),
+                                    }
+                                    for k, v in _cr_raw.items()
+                                    if isinstance(v, dict) and k not in ("macro avg", "weighted avg")
+                                }  # AI가 수정함: 클래스별 지표만 추출 (집계 키 제외)
+                            per_class_json = json.dumps(_per_class, ensure_ascii=False)  # AI가 수정함: JSON 직렬화
 
                             # AI가 수정함: gap_pct = train_acc - test_acc (과적합 지표)
                             gap_pct = round(train_acc - test_acc, 4)  # AI가 수정함: 소수점 4자리 반올림
@@ -210,16 +238,11 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                             # AI가 수정함: n_bands 컬럼값 — 'full'이면 문자열 "full", 아니면 정수
                             n_bands_col = "full" if bm == "full" else int(n_bands_val)  # AI가 수정함: 컬럼 값 결정
 
-                            # --- trial 2d. per-trial confusion matrix PNG 저장 ---
-                            # AI가 수정함: trial 고유 파일명 — bm/mt 이름의 공백/슬래시를 언더스코어로 치환
-                            _safe_bm = bm.replace(" ", "_").replace("/", "_")  # AI가 수정함: 파일명 안전 처리
-                            _safe_mt = mt.replace(" ", "_").replace("/", "_")  # AI가 수정함: 파일명 안전 처리
-                            _cm_stem = f"{csv_timestamp}_g{gap_val}_{_safe_bm}_{_safe_mt}_confusion"  # AI가 수정함: PNG 파일 stem — g{gap_val} 접두사 포함
-                            confusion_png = self._write_confusion_matrix_png(  # AI가 수정함: confusion matrix PNG 저장
-                                _exp_dir, y_test_m, y_pred, _cm_stem, _log
-                            )  # AI가 수정함: 반환값: PNG 경로 문자열 or ""
+                            # AI가 수정함: trial 루프에서 CM PNG 저장하지 않음
+                            # y_test_m, y_pred를 임시 보관 → Step 2.5에서 best trial에만 PNG 생성
+                            # _y_test/_y_pred는 _CSV_FIELDNAMES에 없으므로 CSV 쓰기 전 반드시 제거됨
 
-                            # AI가 수정함: 결과 dict 구성 (15컬럼)
+                            # AI가 수정함: 결과 dict 구성 (16컬럼 + 임시 필드)
                             row = {  # AI가 수정함: trial 결과 dict
                                 "timestamp": trial_ts,  # AI가 수정함: 실행 시각
                                 "band_method": bm,  # AI가 수정함: 밴드 선택 방법
@@ -234,8 +257,11 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                                 "gap_pct": gap_pct,  # AI가 수정함: 과적합 gap
                                 "train_time_ms": round(train_time_ms, 2),  # AI가 수정함: 학습 시간 ms
                                 "selected_bands": json.dumps(list(map(int, selected_indices))),  # AI가 수정함: 밴드 인덱스 JSON 직렬화
-                                "confusion_png_path": confusion_png,  # AI가 수정함: confusion matrix PNG 경로
+                                "confusion_png_path": "",  # AI가 수정함: Step 2.5에서 best trial만 채워짐
+                                "per_class_report": per_class_json,  # AI가 수정함: 클래스별 지표 JSON (모든 ok trial)
                                 "status": "ok",  # AI가 수정함: 정상 완료
+                                "_y_test": y_test_m,  # AI가 수정함: 임시 — best CM 생성용, CSV 쓰기 전 제거
+                                "_y_pred": y_pred,   # AI가 수정함: 임시 — best CM 생성용, CSV 쓰기 전 제거
                             }  # AI가 수정함: 결과 dict 종료
                             results.append(row)  # AI가 수정함: 결과 누적
 
@@ -306,6 +332,22 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
             else:  # AI가 수정함: Level 2 (bm) for-else
                 continue
             break  # AI가 수정함: bm 루프 탈출 전파
+
+        # --- Step 2.5: best trial confusion matrix PNG 생성 ---
+        # AI가 수정함: trial 루프에서 PNG 저장 안 함 → 여기서 best (bm, mt) 조합만 생성
+        # id() set으로 best trial dict 식별 → 한 번 루프로 생성 + 임시 필드 정리
+        _best_for_cm, _ = self._best_per_bm_mt(results)
+        _best_id_set = {id(r) for r in _best_for_cm}
+        for r in results:
+            _yt = r.pop("_y_test", None)
+            _yp = r.pop("_y_pred", None)
+            if id(r) in _best_id_set and _yt is not None and _yp is not None:
+                _safe_bm = r["band_method"].replace(" ", "_").replace("/", "_")
+                _safe_mt = r["model_type"].replace(" ", "_").replace("/", "_")
+                _cm_stem = f"{csv_timestamp}_best_{_safe_bm}_{_safe_mt}_confusion"
+                r["confusion_png_path"] = self._write_confusion_matrix_png(
+                    _exp_dir, _yt, _yp, _cm_stem, _log
+                )  # AI가 수정함: best trial에만 CM PNG 생성 — disk write 15회 이하
 
         # --- Step 3: CSV 저장 ---
         # AI가 수정함: csv_timestamp는 루프 시작 전에 결정됨 (confusion PNG 파일명과 동일 prefix)
@@ -570,6 +612,7 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
         """Write paper-ready summary artifacts from aggregate experiment results."""
         ok_results = [r for r in results if r.get("status") == "ok"]
         _best_results, _best_config_map = self._best_per_bm_mt(results)
+
         summary_path = os.path.join(exp_dir, f"{csv_timestamp}_paper_summary.md")
 
         with open(summary_path, "w", encoding="utf-8") as f:
@@ -624,10 +667,43 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                         ],
                     )
 
+                # AI가 수정함: best trial별 클래스별 precision/recall/f1 테이블
+                # per_class_report JSON 파싱 — 클래스 이름, 꼴찌 클래스 식별용
+                if _best_results:
+                    f.write("## Per-Class Metrics (Best Trials)\n\n")
+                    for r in sorted(_best_results, key=lambda x: -float(x.get("test_acc", 0.0))):
+                        _pcr_raw = r.get("per_class_report", "")
+                        if not _pcr_raw:
+                            continue
+                        try:
+                            _pcr = json.loads(_pcr_raw)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        _bm = r["band_method"]
+                        _mt = r["model_type"]
+                        _gap = r.get("gap", "-")
+                        _nb = r.get("n_bands", "-")
+                        _acc = f"{float(r['test_acc']):.2f}%" if r.get("test_acc") not in ("", None) else "-"
+                        f.write(f"### {_bm} / {_mt}  (gap={_gap}, n_bands={_nb}, test_acc={_acc})\n\n")
+                        self._write_markdown_table(
+                            f,
+                            ["Class", "Precision", "Recall", "F1", "Support"],
+                            [
+                                [
+                                    cls_name,
+                                    f"{vals['precision']:.4f}",
+                                    f"{vals['recall']:.4f}",
+                                    f"{vals['f1']:.4f}",
+                                    vals["support"],
+                                ]
+                                for cls_name, vals in sorted(_pcr.items())
+                            ],
+                        )  # AI가 수정함: 클래스명 알파벳순 정렬로 가독성 확보
+
                 f.write("## Matrix Tables\n\n")
                 for metric_key, title in _PAPER_MATRIX_METRICS:
                     f.write(f"### {title}\n\n")
-                    rows = self._build_metric_matrix(ok_results, band_methods, model_types, metric_key)
+                    rows = self._build_metric_matrix(_best_results, band_methods, model_types, metric_key)  # AI가 수정함: first-match → best-per-(bm,mt) 로 수정
                     self._write_markdown_table(f, ["Band Method", *model_types], rows)
 
                 # AI가 수정함: n_bands별 비교 테이블 (행=band_method/model_type, 열=n_bands, 셀=acc%(gap=N))
@@ -647,7 +723,7 @@ class ExperimentRunner:  # AI가 수정함: QObject 상속 절대 금지 — 순
                             if np.isnan(acc):
                                 row_cells.append("-")
                             else:
-                                cell = f"{acc * 100:.2f}%"
+                                cell = f"{acc:.2f}%"
                                 if gap is not None and gap > 0:
                                     cell += f" (gap={gap})"
                                 row_cells.append(cell)
