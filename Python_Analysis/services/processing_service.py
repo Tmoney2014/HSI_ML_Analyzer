@@ -211,9 +211,23 @@ class ProcessingService:
                 expanded = []
                 for i in range(len(dependencies)):
                     dep = set()
-                    left = max(0, i - radius)
-                    right = min(last, i + radius)
-                    for j in range(left, right + 1):
+                    # scipy savgol_filter default mode='interp': boundary positions use a
+                    # full window_size polynomial fit anchored to the edge of the data,
+                    # not a clipped symmetric window.  Dependency support:
+                    #   left boundary  (i < radius):          [0 .. window_size-1]
+                    #   interior       (radius <= i <= last-radius): [i-radius .. i+radius]
+                    #   right boundary (i > last-radius):      [last-window_size+1 .. last]
+                    # AI가 수정함: SG boundary dependency를 mode='interp' 실제 동작에 맞게 수정
+                    if i < radius:
+                        j_start = 0
+                        j_end = min(window_size - 1, last)
+                    elif i > last - radius:
+                        j_start = max(0, last - window_size + 1)
+                        j_end = last
+                    else:
+                        j_start = i - radius
+                        j_end = i + radius
+                    for j in range(j_start, j_end + 1):
                         dep.update(dependencies[j])
                     expanded.append(dep)
                 dependencies = expanded

@@ -190,9 +190,14 @@ class LearningService:
         model = LogisticRegression(**_kwargs)  # AI가 수정함: 버전 분기 적용
         try:
             model.fit(X_train, y_train)  # AI가 수정함: Logistic Regression 학습 수행
-            assert (  # AI가 수정함: multinomial weight shape 검증
-                model.coef_.shape[0] == len(np.unique(y))  # AI가 수정함: multinomial weight shape 검증
-            ), f"LogReg coef shape mismatch: {model.coef_.shape[0]} != {len(np.unique(y))}"  # AI가 수정함: multinomial weight shape 검증
+            # sklearn binary LogReg returns coef_.shape[0]==1 (not n_classes).
+            # Allow 1-row for binary (2 unique classes), n_classes rows for multiclass.
+            # AI가 수정함: binary LogReg는 coef_ 행이 1개이므로 binary 케이스 허용 추가
+            _n_unique = len(np.unique(y))
+            _expected_coef_rows = 1 if _n_unique == 2 else _n_unique
+            assert (
+                model.coef_.shape[0] == _expected_coef_rows
+            ), f"LogReg coef shape mismatch: {model.coef_.shape[0]} != {_expected_coef_rows}"
 
             y_train_pred = model.predict(X_train)  # AI가 수정함: train 예측값 계산
             y_test_pred = model.predict(X_test)  # AI가 수정함: test 예측값 계산
