@@ -60,6 +60,7 @@ class OptimizationWorker(QObject):
     def run(self):
         try:
             self.log_message.emit("=== Starting Auto-Optimization (Background) ===")
+            self._log_configuration()  # AI가 수정함: 설정 헤더 추가 (training_worker와 통일)
             
             # 1. Prepare Data ONCE (Speed Optimization)
             self.log_message.emit("Pre-loading and masking data (Full Dataset)...")
@@ -135,6 +136,21 @@ class OptimizationWorker(QObject):
             pct = int(self._completed_trials * 100 / self._total_trials)  # AI가 수정함: 진행률 계산
             self.progress_update.emit(min(pct, 99))  # AI가 수정함: 100%는 완료 시에만
         return score
+
+    def _log_configuration(self):  # AI가 수정함: 설정 헤더 로그 (training_worker와 통일)
+        self.log_message.emit("-" * 40)
+        self.log_message.emit("[Preprocessing Configuration]")
+        self.log_message.emit(f" • Mode: {self.processing_mode}")
+        self.log_message.emit(f" • Threshold: {self.threshold}")
+        self.log_message.emit(f" • Mask Rules: {self.mask_rules if self.mask_rules else 'None'}")
+        if not self.base_prep_chain:
+            self.log_message.emit(" • Chain: None (Raw)")
+        else:
+            for i, step in enumerate(self.base_prep_chain):
+                name = step['name']
+                p_str = ", ".join([f"{k}={v}" for k, v in step['params'].items()])
+                self.log_message.emit(f" • Step {i+1}: {name} ({p_str})")
+        self.log_message.emit("-" * 40)
 
     def _prepare_base_data(self):
         """

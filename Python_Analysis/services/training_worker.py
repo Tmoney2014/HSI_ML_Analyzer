@@ -300,11 +300,12 @@ class TrainingWorker(QObject):
         X_all = []
         y_all = []
         
+        total_classes = len(valid_groups)  # AI가 수정함: 클래스 수 추적
         total_files = sum(len(f) for f in valid_groups.values())
         processed_cnt = 0
         
         for label_id, (class_name, files) in enumerate(valid_groups.items()):
-            if not silent: self.log_message.emit(f"Processing Class '{class_name}'...")
+            class_pixels = 0  # AI가 수정함: 클래스별 픽셀 수 추적
             
             # AI가 수정함: 파일 로딩 순서 고정 (재현성 보장)
             sorted_files = sorted(files)
@@ -363,9 +364,13 @@ class TrainingWorker(QObject):
                 if X_file.shape[0] > 0:
                     X_all.append(X_file)
                     y_all.append(np.full(X_file.shape[0], label_id))
+                    class_pixels += X_file.shape[0]  # AI가 수정함: 픽셀 수 누적
                 
                 processed_cnt += 1
                 if not silent: self.progress_update.emit(int((processed_cnt / total_files) * 50))
+            
+            if not silent:  # AI가 수정함: 클래스별 픽셀 수 로그 (optimization_worker와 통일)
+                self.log_message.emit(f"  [{label_id+1}/{total_classes}] {class_name}: {class_pixels:,} pixels")
 
         if not X_all:
             return None, None
