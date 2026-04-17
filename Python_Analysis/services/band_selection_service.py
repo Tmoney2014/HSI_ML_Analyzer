@@ -3,11 +3,26 @@ import warnings  # AI가 수정함: Task 2 - UserWarning 출력용
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis  # AI가 수정함: Task 2 - LDA 기반 방법 추가
 from sklearn.feature_selection import f_classif  # AI가 수정함: ANOVA-F 방법 추가
-from sklearn.model_selection import cross_val_score  # AI가 수정함: Task 2 - SPA-LDA greedy용
+from sklearn.model_selection import cross_val_score, StratifiedShuffleSplit  # AI가 수정함: Task 2 - SPA-LDA greedy용
 from scipy.signal import savgol_filter
 from config import get as cfg_get  # AI가 수정함: 설정 파일 사용
 
 _SUPERVISED_METHODS = ('anova_f', 'spa_lda_fast', 'spa_lda_greedy', 'lda_coef')  # AI가 수정함: supervised 방법 목록 정의
+
+
+def _stratified_subsample(X, labels, max_samples, random_state=42):
+    """클래스 비율을 유지한 서브샘플링. Stratified 불가 시 random fallback."""  # AI가 수정함: stratified 서브샘플링 헬퍼 추가
+    if X.shape[0] <= max_samples:
+        return X, labels
+    try:
+        sss = StratifiedShuffleSplit(n_splits=1, train_size=max_samples, random_state=random_state)
+        sub_idx, _ = next(sss.split(X, labels))
+    except ValueError:
+        # 클래스 수 부족 또는 샘플 수 제약으로 stratified 불가 → random fallback
+        rng = np.random.RandomState(random_state)
+        sub_idx = rng.choice(X.shape[0], max_samples, replace=False)
+    return X[sub_idx], labels[sub_idx]
+
 
 def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, keep_order=False, labels=None):  # AI가 수정함: labels 인자 추가
     # AI가 수정함: keep_order 파라미터 추가 - SPA 선택 순서 유지 옵션
@@ -81,14 +96,7 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         max_samples = cfg_get('spa', 'max_samples', 10000)
         if not isinstance(max_samples, int):
             max_samples = 10000
-        if X.shape[0] > max_samples:
-            rng = np.random.RandomState(42)
-            sub_idx = rng.choice(X.shape[0], max_samples, replace=False)
-            X_lda = X[sub_idx]
-            labels_lda = labels[sub_idx]  # AI가 수정함: 동일 인덱스로 subsample
-        else:
-            X_lda = X
-            labels_lda = labels
+        X_lda, labels_lda = _stratified_subsample(X, labels, max_samples)  # AI가 수정함: stratified 서브샘플링으로 교체
         lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto')  # AI가 수정함: solver='svd' 절대 금지
         try:
             lda.fit(X_lda, labels_lda)
@@ -105,14 +113,7 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         max_samples = cfg_get('spa', 'max_samples', 10000)
         if not isinstance(max_samples, int):
             max_samples = 10000
-        if X.shape[0] > max_samples:
-            rng = np.random.RandomState(42)
-            sub_idx = rng.choice(X.shape[0], max_samples, replace=False)
-            X_s = X[sub_idx]
-            labels_s = labels[sub_idx]  # AI가 수정함: 동일 인덱스로 subsample
-        else:
-            X_s = X
-            labels_s = labels
+        X_s, labels_s = _stratified_subsample(X, labels, max_samples)  # AI가 수정함: stratified 서브샘플링으로 교체
         # Step 1: SPA로 n_candidates개 후보 추출
         n_candidates = min(X_s.shape[1], max(n_bands * 3, n_bands + 2))  # AI가 수정함: 후보 풀 크기
         P = X_s.copy()
@@ -140,7 +141,7 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
             coef_cand = np.var(X_cand, axis=0)
         top_local = list(np.argsort(coef_cand)[::-1][:n_bands])
         selected_internal_indices = [spa_candidates[i] for i in top_local]
-        importance_scores[selected_internal_indices] = coef_cand[top_local]
+        importance_scores[spa_candidates] = coef_cand  # AI가 수정함: 모든 SPA candidate LDA 점수 저장 (시각화용)
 
     elif method == 'spa_lda_greedy':  # AI가 수정함: Greedy cross-validation 밴드 선택
         assert labels is not None
@@ -152,14 +153,7 @@ def select_best_bands(data_cube, n_bands=5, method='spa', exclude_indices=None, 
         max_samples = cfg_get('spa', 'max_samples', 10000)
         if not isinstance(max_samples, int):
             max_samples = 10000
-        if X.shape[0] > max_samples:
-            rng = np.random.RandomState(42)
-            sub_idx = rng.choice(X.shape[0], max_samples, replace=False)
-            X_g = X[sub_idx]
-            labels_g = labels[sub_idx]  # AI가 수정함: 동일 인덱스로 subsample
-        else:
-            X_g = X
-            labels_g = labels
+        X_g, labels_g = _stratified_subsample(X, labels, max_samples)  # AI가 수정함: stratified 서브샘플링으로 교체
         # cv = min(3, min_class_count) — 필수 제약
         class_counts = np.bincount(labels_g.astype(int))
         min_class_count = int(np.min(class_counts[class_counts > 0]))
