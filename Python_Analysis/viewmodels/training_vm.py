@@ -1,4 +1,4 @@
-from PyQt5.QtCore import QObject, pyqtSignal, QThread
+from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer
 from PyQt5.QtWidgets import QApplication
 from typing import List, Optional
 import numpy as np
@@ -333,7 +333,10 @@ class TrainingViewModel(QObject):
         
         # 2. State Snapshot (AI가 수정함: 공통 메서드 사용)
         vm_state = self._create_vm_state_snapshot()
-        raw_band_count = self._get_raw_band_count()
+        # AI가 수정함: 캐시 히트 시 I/O 없이 즉시 반환; 캐시 미스 시만 동기 I/O fallback (TrainingWorker는 raw_band_count=0 미지원)
+        raw_band_count = self._get_raw_band_count_cached_only()
+        if raw_band_count <= 0:
+            raw_band_count = self._get_raw_band_count()
         
         # AI가 수정함: 캐시 구조 통합 - Base Data 캐시만 사용
         # 3. Worker Params
@@ -375,8 +378,8 @@ class TrainingViewModel(QObject):
         self.worker.training_finished.connect(self._on_training_cleanup)  # AI가 수정함: cleanup 함수로 변경
         self.worker.base_data_ready.connect(self.on_base_data_ready)
         
-        self.main_vm.request_save()
         self.worker_thread.start()
+        QTimer.singleShot(0, self.main_vm.request_save)  # AI가 수정함: 워커 먼저 시작, 저장은 이벤트루프로 지연 — 버튼→첫 로그 지연 제거
     
     def _safe_cleanup_thread(self):
         """
@@ -520,8 +523,8 @@ class TrainingViewModel(QObject):
         self.opt_worker.base_data_ready.connect(self.on_base_data_ready)
         
         # 5. Start
-        self.main_vm.request_save()
         self.opt_thread.start()
+        QTimer.singleShot(0, self.main_vm.request_save)  # AI가 수정함: 워커 먼저 시작, 저장은 이벤트루프로 지연 — 버튼→첫 로그 지연 제거
     
     def _safe_cleanup_opt_thread(self):
         """
@@ -600,7 +603,7 @@ class TrainingViewModel(QObject):
         self.experiment_model_types = list(model_types)  # AI가 수정함: Export Matrix 선택 상태 동기화
         self._ensure_ref_loaded()
         vm_state = self._create_vm_state_snapshot()
-        raw_band_count = self._get_raw_band_count()
+        raw_band_count = self._get_raw_band_count_cached_only()  # AI가 수정함: 메인 스레드 I/O 블로킹 방지 — 캐시에 있는 파일만 사용, 없으면 0 전달하여 워커에서 lazy 결정
         params = {
             'band_methods': band_methods,
             'model_types': model_types,
@@ -624,8 +627,8 @@ class TrainingViewModel(QObject):
         self.exp_worker.progress_update.connect(self.progress_update)
         self.exp_worker.experiment_finished.connect(self._on_experiment_cleanup)
         self.exp_worker.base_data_ready.connect(self.on_base_data_ready)
-        self.main_vm.request_save()
         self.exp_thread.start()
+        QTimer.singleShot(0, self.main_vm.request_save)  # AI가 수정함: 워커 먼저 시작, 저장은 이벤트루프로 지연 — 버튼→첫 로그 지연 제거
 
     def _safe_cleanup_exp_thread(self):  # AI가 수정함: Experiment thread 안전 정리
         if self.exp_thread is None: return True
