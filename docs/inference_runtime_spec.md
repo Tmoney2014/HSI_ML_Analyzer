@@ -63,15 +63,15 @@
 
 | OriginalType | IsMultiClass | Weights shape | Bias shape | Runtime 해석 메모 |
 |---|---:|---|---|---|
-| `LinearSVC` | `false` | `[Feature]` | `double` | binary linear classifier |
+| `LinearSVC` | `false` | `[[Feature]]` | `[double]` | binary linear classifier (2-class expanded export) |
 | `LinearSVC` | `true` | `[Class][Feature]` | `[Class]` | OvR multiclass |
-| `LogisticRegression` | `false` | `[Feature]` | `double` | Python exporter가 binary row를 flat하게 내보냄  <!-- AI가 수정함 --> |
+| `LogisticRegression` | `false` | `[[Feature]]` | `[double]` | binary linear classifier (2-class expanded export) |
 | `LogisticRegression` | `true` | `[Class][Feature]` | `[Class]` | multinomial / multiclass linear model |
-| `RidgeClassifier` | `false` | `[Feature]` | `double` | Python exporter가 binary row를 flat하게 내보냄  <!-- AI가 수정함 --> |
+| `RidgeClassifier` | `false` | `[[Feature]]` | `[double]` | binary linear classifier (2-class expanded export) |
 | `RidgeClassifier` | `true` | `[Class][Feature]` | `[Class]` | multiclass linear model |
-| `LinearDiscriminantAnalysis` | `false` | `[Feature]` | `double` | binary LDA export |
+| `LinearDiscriminantAnalysis` | `false` | `[[Feature]]` | `[double]` | binary LDA export (2-class expanded) |
 | `LinearDiscriminantAnalysis` | `true` | `[Class][Feature]` 또는 exporter가 허용한 row shape | `[Class]` | `coef_` row count는 구현/설정 영향을 받을 수 있으므로 `OriginalType`과 exporter policy를 함께 확인  <!-- AI가 수정함 --> |
-| `PLSRegression` | `false` | `[Feature]` | `double` | Python exporter의 `export_coef_` / `export_intercept_` 기준 |
+| `PLSRegression` | `false` | `[[Feature]]` | `[double]` | Python exporter의 `export_coef_` / `export_intercept_` 기준 (binary PLS-DA) |
 | `PLSRegression` | `true` | `[Class][Feature]` | `[Class]` | Python exporter가 `export_coef_`를 class-major로 정규화한 결과 사용 |
 
 ### 2.2.1. Sample JSON Snippets  <!-- AI가 수정함: 구체적 Weights/Bias shape 예시 추가 -->

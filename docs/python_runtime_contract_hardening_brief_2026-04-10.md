@@ -58,6 +58,10 @@
 **Chosen Python direction**  <!-- AI가 수정함: 방향 확정 섹션으로 교체 -->
 Option 2를 채택한다: **shape를 억지로 통일하지 않고, 모델별 export shape를 유지하되 문서/테스트로 contract를 고정한다.**  <!-- AI가 수정함 -->
 
+> **[2026-04-20 업데이트]**: [C-1] 버그 수정으로 binary LogReg/Ridge/SVC/LDA는
+> 2D/1D 형식으로 전환 (Path A 채택). PLS-DA만 예외 (IsMultiClass=false 유지).
+> 상세: `.sisyphus/plans/parity-fix.md`
+
 이 방향에서 Python이 해야 할 일:  <!-- AI가 수정함 -->
 1. `OriginalType`별 `Weights` / `Bias` shape를 표로 문서화  <!-- AI가 수정함 -->
 2. binary / multiclass에서 `IsMultiClass`와 shape 관계를 명시  <!-- AI가 수정함 -->

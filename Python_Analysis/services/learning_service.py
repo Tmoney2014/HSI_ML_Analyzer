@@ -333,9 +333,9 @@ class LearningService:
         Metrics: Optional performance dict from train_model
 
         Runtime contract note:
-        - Python exporter preserves model-specific `Weights` / `Bias` shapes.  # AI가 수정함: shape policy 명시
+        - binary linear models (LogReg/Ridge/SVC/LDA): 2-class 전개 Weights=[[−w],[+w]], Bias=[−b,+b], IsMultiClass=True  # AI가 수정함: C-1 패리티 픽스 (2026-04-20)
+        - PLS-DA binary: Weights=[[f0,...]], Bias=[b0], IsMultiClass=False (단일 클래스 감싸기)  # AI가 수정함: C-1 패리티 픽스 (2026-04-20)
         - C# runtime must interpret them using `OriginalType` + `IsMultiClass`.  # AI가 수정함: model-aware parser 계약 명시
-        - Do not force all models into one universal tensor shape here unless the runtime spec/docs/tests are updated together.  # AI가 수정함: 계약 드리프트 방지
         """
         model_type_name = type(model).__name__
         
@@ -393,7 +393,8 @@ class LearningService:
                             RuntimeWarning
                         )
             else:
-                # Binary or Single Class
+                # Binary → 2-class 전개 (argmax ≡ sklearn decision_function 부호 판정)
+                # AI가 수정함: C-1 패리티 픽스 — Weights 1D→2D, Bias scalar→list (2026-04-20)
                 if model.coef_.ndim == 1:
                      raw_coef = model.coef_
                 else:
@@ -409,14 +410,15 @@ class LearningService:
                             f"Ensure original_bands covers all values in selected_bands before dedup."
                         )
                     raw_coef = raw_coef[col_order]
-                weights = raw_coef.tolist()
-                
-                # Ensure bias is float
-                if hasattr(model.intercept_, '__len__') and len(model.intercept_) > 0:
-                   bias = float(model.intercept_[0])
-                else: 
-                   bias = float(model.intercept_) # Fallback
-                is_multiclass = False
+                # Expand to 2-class: class0=[-w], class1=[+w]; argmax matches sklearn decision_function sign
+                intercept_arr = np.asarray(model.intercept_).ravel()
+                if intercept_arr.size > 0:
+                   bias_scalar = float(intercept_arr[0])
+                else:
+                   bias_scalar = float(model.intercept_)
+                weights = [(-raw_coef).tolist(), raw_coef.tolist()]
+                bias = [-bias_scalar, bias_scalar]
+                is_multiclass = True
 
                 
         elif isinstance(model, PLSRegression):
@@ -430,8 +432,9 @@ class LearningService:
                 else: 
                     # Generally PLS-DA with >2 classes is multiclass
                     if model.export_coef_.shape[0] == 1:
-                        weights = model.export_coef_[0].tolist()
-                        bias = float(model.export_intercept_[0])
+                        # AI가 수정함: C-1 패리티 픽스 — PLS-DA binary도 nested list로 감싸기 (2026-04-20)
+                        weights = [model.export_coef_[0].tolist()]   # [[f0, f1, ...]]
+                        bias = [float(model.export_intercept_[0])]   # [b0]
                         is_multiclass = False
                     else:
                         weights = model.export_coef_.tolist()
