@@ -78,16 +78,41 @@
 
 아래 예시는 `OriginalType`과 `IsMultiClass` 조합에 따른 `Weights`/`Bias` shape를 보여줍니다. 전체 shape 규칙은 표 2.2 참조.
 
-**Binary 예시 (LinearSVC, IsMultiClass=false):**
+**Binary 예시 (LinearSVC, IsMultiClass=false) — 2-class 전개 형식:**  <!-- AI가 수정함: C-1 픽스 후 올바른 binary 형식으로 갱신 (2026-04-20) -->
 
 ```json
 {
   "OriginalType": "LinearSVC",
   "IsMultiClass": false,
-  "Weights": [0.12, -0.45, 0.33, 0.07, -0.21],
-  "Bias": 0.05
+  "Weights": [
+    [-0.12,  0.45, -0.33, -0.07,  0.21],
+    [ 0.12, -0.45,  0.33,  0.07, -0.21]
+  ],
+  "Bias": [-0.05, 0.05]
 }
 ```
+
+> `Weights[0] = -Weights[1]`, `Bias[0] = -Bias[1]` 는 2-class 전개의 불변 조건.  
+> argmax(class0_score, class1_score) ≡ sklearn decision\_function 부호 판정.
+
+**⚠️ C# 분류기 라우팅에 따른 confidence zone 차이**  <!-- AI가 수정함: confidence zone 설명 추가 (2026-04-20) -->
+
+Binary 2-class 전개 시 C# `LinearClassifier.Predict()`의 라우팅 경로에 따라 sklearn과 결과가 차이날 수 있다.
+
+`z = w·x + b` (sklearn의 `decision_function` 값) 라 할 때:
+
+| OriginalType | C# 경로 | 분류 경계 | Confidence zone |
+|---|---|---|---|
+| `RidgeClassifier` | `ArgMaxOnly` | z = 0 (sklearn과 동일) | 없음 — 항상 class 반환 |
+| `LinearSVC` | `ArgMaxOnly` | z = 0 (sklearn과 동일) | 없음 — 항상 class 반환 |
+| `LogisticRegression` | `SoftmaxAndThreshold(0.75)` | z = 0 (동일) | `0 < |z| < log(3)/2 ≈ 0.55` 구간에서 Unknown(-1) |
+| `LinearDiscriminantAnalysis` | `SoftmaxAndThreshold(0.75)` | z = 0 (동일) | `0 < |z| < log(3)/2 ≈ 0.55` 구간에서 Unknown(-1) |
+
+**근거**: `softmax([-z, +z])[1] = sigmoid(2z)`. `sigmoid(2z) ≥ 0.75` iff `z ≥ log(3)/2 ≈ 0.55`.  
+따라서 sklearn이 class를 반환하는 `0 < z < 0.55` 구간에서 C#은 **Unknown(-1)** 을 반환한다.
+
+분류 경계(z=0) 자체는 동일하므로 확신도가 높은 픽셀은 sklearn과 동일하게 분류된다. 이 차이는 런타임이 불확실 픽셀에 Unknown을 거는 **설계 의도**이며 버그가 아니다.  
+확신도 임계값은 `LinearClassifier.SetThreshold(double)` API로 조정 가능하다.
 
 **Multiclass 예시 (LogisticRegression, IsMultiClass=true, 3 classes):**
 

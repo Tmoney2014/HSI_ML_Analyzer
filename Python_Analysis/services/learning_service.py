@@ -358,10 +358,16 @@ class LearningService:
             total_bands = len(mean_spectrum)
 
         # 1. Extract Weights based on Model Type
-        # AI가 수정함: exporter는 model-specific shape를 유지하고, runtime은 OriginalType/IsMultiClass로 해석합니다.
-        # - multiclass linear models: Weights=[Class][Feature], Bias=[Class]
-        # - binary linear models: Weights=[Feature], Bias=float
-        # - PLS-DA export는 export_coef_/export_intercept_를 사용해 class-major orientation을 보장합니다.
+        # AI가 수정함: C-1 패리티 픽스 (2026-04-20) — binary/multiclass export shape 정책:
+        # - multiclass linear models (n_classes > 2): Weights=[Class][Feature], Bias=[Class], IsMultiClass=True
+        # - binary linear models (LogReg/Ridge/SVC/LDA): Weights=[[-w],[+w]], Bias=[-b,+b], IsMultiClass=True
+        #   → argmax([class0, class1]) ≡ sklearn decision_function 부호 판정과 동치
+        #   ※ C# 라우팅 주의: LogReg/LDA는 SoftmaxAndThreshold(0.75) 경로 사용.
+        #     0 < |z| < log(3)/2 ≈ 0.55 구간에서 sklearn은 class를 반환하지만 C#은 Unknown(-1) 반환.
+        #     (분류 경계 z=0은 동일. 낮은 확신 픽셀에 Unknown 반환은 런타임 설계 의도.)
+        #     Ridge/SVC는 ArgMaxOnly 경로이므로 이 confidence zone 미적용.
+        # - PLS-DA binary: Weights=[[f0,...]], Bias=[b0], IsMultiClass=False
+        # - PLS-DA multiclass: export_coef_/export_intercept_ class-major orientation 사용
         if isinstance(model, (LinearSVC, LinearDiscriminantAnalysis, RidgeClassifier, LogisticRegression)):  # AI가 수정함: Ridge, LogReg 추가 — isinstance 체인 확장
             # Both LinearSVC and LDA share similar coef_ structure
             if model.coef_.ndim > 1 and model.coef_.shape[0] > 1:
