@@ -350,8 +350,9 @@ class LearningService:
         
         # AI가 수정함: V2-SB — selected_bands 정규화 (sort + dedup)
         # SPA는 비정렬 순서로 반환 가능 → 정렬 후 Weights 열도 동일 순서로 재정렬 필요
-        original_bands = list(selected_bands)
-        selected_bands = sorted(set(int(b) for b in selected_bands))
+        # AI가 수정함: M-P2 패리티 픽스 — str vs int 타입 불일치로 인한 spurious reorder 방지 (2026-04-20)
+        original_bands = [int(b) for b in selected_bands]   # normalize type, preserve order
+        selected_bands = sorted(set(original_bands))
 
         # AI가 수정함: V2-RRB — total_bands None일 때 mean_spectrum 길이로 자동 유추
         if total_bands is None and mean_spectrum is not None:
@@ -505,14 +506,20 @@ class LearningService:
         if isinstance(bias, list):
             assert len(bias) > 0, "export_model: Bias must not be empty."
         
+        def _build_prep_chain_order(preprocessing_config):
+            # AI가 수정함: M-P1 패리티 픽스 — PrepChainOrder 화이트리스트
+            # 'Absorbance'는 Mode 신호이므로 제외. C# HsiPipeline.RegisterProcessorsByChainOrder가 처리하는 step만 허용.
+            _PREP_CHAIN_RUNTIME_STEPS = frozenset({'SG', 'SimpleDeriv', 'SNV', 'L2', 'MinSub', 'MinMax'})
+            prep_chain_order = []
+            if preprocessing_config:
+                for step in preprocessing_config:
+                    step_name = step.get('name')
+                    if step_name and step_name in _PREP_CHAIN_RUNTIME_STEPS:
+                        prep_chain_order.append(step_name)
+            return prep_chain_order
+
         # AI가 추가함: PrepChainOrder — C# HsiPipeline이 전처리 순서를 prep_chain 그대로 재현하기 위한 필드
-        # Python prep_chain의 각 step 이름만 순서대로 추출 (파라미터 제외, C#은 Preprocessing 섹션에서 읽음)
-        prep_chain_order = []
-        if preprocessing_config:
-            for step in preprocessing_config:
-                step_name = step.get('name')
-                if step_name:
-                    prep_chain_order.append(step_name)
+        prep_chain_order = _build_prep_chain_order(preprocessing_config)
         
         export_data = {
             "ModelType": "LinearModel", # Unified name
