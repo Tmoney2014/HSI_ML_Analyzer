@@ -29,8 +29,12 @@ Python 학습기는 **패리티의 모체(source contract)** 이고, C# FlashHSI
 | `apply_snv` | `FlashHSI.Core/Preprocessing/Processors.cs` | `SnvProcessor.Process()` |
 | `apply_minmax_norm` | `FlashHSI.Core/Preprocessing/Processors.cs` | `MinMaxProcessor.Process()` |
 | `apply_l2_norm` | `FlashHSI.Core/Preprocessing/Processors.cs` | `L2NormalizeProcessor.Process()` |
+| `apply_min_subtraction` | `FlashHSI.Core/Preprocessing/Processors.cs` | `MinSubProcessor.Process()` |
+| `apply_savgol` | `FlashHSI.Core/Preprocessing/Processors.cs` | `SavitzkyGolayProcessor.Process()` |
+| `apply_absorbance` (standalone) | `FlashHSI.Core/Preprocessing/Processors.cs` | `AbsorbanceProcessor.Process()` |
 | (Pipeline 순서) | `FlashHSI.Core/Pipelines/HsiPipeline.cs` | `ProcessFrame()` |
 | (model.json 스키마) | `FlashHSI.Core/ModelData.cs` | `ModelConfig`, `PreprocessingConfig` |
+| (분류 라우팅) | `FlashHSI.Core/Classifiers/LinearClassifier.cs` | `Predict()` |
 
 ## 검증 대상 함수 및 C# 대응 공식
 
@@ -109,6 +113,89 @@ if (std > 1e-9) { ... }
 
 **✅ 동일**: L2 Euclidean norm + zero-guard 정책 일치.
 
+### 6. `apply_min_subtraction(data)` ↔ `MinSubProcessor.Process()`  <!-- AI가 수정함: 누락 항목 추가 -->
+
+**Python 공식** (`processing.py`):
+```python
+return data - np.min(data, axis=1, keepdims=True)
+```
+
+**C# 공식** (`Processors.cs`):
+```csharp
+double minVal = input[0];
+for (int i = 1; i < length; i++) if (input[i] < minVal) minVal = input[i];
+for (int i = 0; i < length; i++) output[i] = input[i] - minVal;
+```
+
+**검증 포인트:**
+- 둘 다 per-spectrum (행 단위) 최솟값 차감 ✅
+- Python axis=1 keepdims=True = C# 스펙트럼 단위 루프 ✅
+- zero-guard 없음 (범위가 0이어도 차감만 수행 — 결과는 전부 0)
+
+### 7. `apply_savgol(data, window_size, poly_order, deriv)` ↔ `SavitzkyGolayProcessor.Process()`  <!-- AI가 수정함: 누락 항목 추가 -->
+
+**Python 공식** (`processing.py`):
+```python
+# even → odd 보정
+if window_size % 2 == 0: window_size += 1
+# 검증: window > poly, data.shape[1] >= window, deriv <= poly (ValueError)
+result = scipy.signal.savgol_filter(data, window_length=window_size,
+                                     polyorder=poly_order, deriv=deriv, axis=1)
+```
+
+**C# 공식** (`Processors.cs` / `SavitzkyGolayProcessor`):
+```csharp
+// even → odd 보정 (동일)
+// Vandermonde pseudoinverse로 center coefficients 계산
+// ComputeEdgeWeights(): scipy mode='interp' 경계 처리 (polynomial edge interpolation)
+// 무효 파라미터: silently clamp (polyOrder → windowSize-1, derivOrder → polyOrder, etc.)
+// length < windowSize: 스펙트럼 전체 스킵 (무처리 — 원본 유지)
+```
+
+**검증 포인트:**
+- 수학: ✅ scipy `savgol_filter` 완전 패리티 (Vandermonde + pseudoinverse)
+- 경계 처리: ✅ scipy `mode='interp'` 패리티 (polynomial edge interpolation)
+- even→odd 보정: ✅ 동일
+- **에러 처리 차이**: Python raises ValueError → C# silently clamps/skips  
+  → 허용: Python이 export 전에 유효성 검증 완료. C# 런타임엔 항상 valid params만 도달.
+- **주의**: `length < windowSize`일 때 C#은 해당 스펙트럼을 무처리로 통과. 런타임에서 이 조건이 발생하면 SG가 적용되지 않은 스펙트럼이 혼재 가능.
+
+### 8. `apply_absorbance(data, epsilon)` standalone ↔ `AbsorbanceProcessor.Process()`  <!-- AI가 수정함: 누락 항목 추가 -->
+
+**Python 공식** (`processing.py`):
+```python
+local_R = np.maximum(data, epsilon)   # epsilon=1e-6
+return -np.log10(local_R)
+```
+
+**C# 공식** (`Processors.cs`):
+```csharp
+const double Epsilon = 1e-6;
+output[i] = -Math.Log10(Math.Max(input[i], Epsilon));
+```
+
+**검증 포인트:**
+- epsilon 값: Python 1e-6 / C# 1e-6 ✅
+- 공식: `-log10(max(R, epsilon))` 완전 일치 ✅
+- PrepChain 내 위치: Python에서 `apply_absorbance`는 `get_base_data()` 단계에서 처리되므로 `PrepChainOrder`에 포함되지 않음 (있으면 ValueError). C#은 `AbsorbanceProcessor`가 CalibrationProcessor 다음, PrepChain 이전에 등록됨 — 순서 ✅
+
+### 9. 분류 라우팅 ↔ `LinearClassifier.Predict()`  <!-- AI가 수정함: 누락 항목 추가 -->
+
+**C# 라우팅 분기** (`LinearClassifier.cs`):
+| OriginalType 조건 | C# 분기 | 동작 |
+|---|---|---|
+| `Contains("PLS")` | `PlsThreshold()` | clamp 0~1 → threshold 0.75 → Unknown(-1) 가능 |
+| `Contains("SVM")` \| `Contains("SVC")` \| `Contains("Ridge")` | `ArgMaxOnly()` | 항상 클래스 반환 (Unknown 없음) |
+| else (LogReg, LDA) | `SoftmaxAndThreshold()` | softmax + 0.75 threshold → Unknown(-1) 가능 |
+
+**검증 포인트:**
+- Binary Ridge: `ArgMaxOnly` → 2D weights argmax → Unknown 없음 ✅ (M-1 수정 후)
+- Binary LogReg: `SoftmaxAndThreshold` → 2D softmax ≈ sigmoid → 확률 올바름 ✅
+- Binary LDA: `SoftmaxAndThreshold` → 2D softmax → ✅
+- Binary SVC: `ArgMaxOnly` → ✅
+- Binary PLS-DA: `PlsThreshold` (IsMultiClass=False) → 단일 클래스 score clamp → threshold ✅
+- **⚠️ 비대칭 주의**: Ridge/SVC binary → Unknown 없음 / LogReg/LDA binary → Unknown(−1) 가능 (0.75 미만 확신도). 의도적 설계이면 OK.
+
 ## 추가 계약 검증 포인트 (model-aware contract)  <!-- AI가 수정함: 모델별 shape 계약 섹션 추가 -->
 
 ### `learning_service.py::export_model()` ↔ `FlashHSI.Core/ModelData.cs`
@@ -147,8 +234,22 @@ if (std > 1e-9) { ... }
 7. `RequiredRawBands` 계산 로직이 gap + order와 정합하는지 확인
 8. `HsiPipeline.RegisterProcessorsByChainOrder()`가 `PrepChainOrder`를 재현하는지 확인
 9. `ModelData.cs` / 분류기 계층이 `OriginalType` + `IsMultiClass` 기준으로 `Weights` / `Bias`를 해석하는지 확인  <!-- AI가 수정함 -->
-10. 잠재적 패리티 위험 목록 출력
-11. `DerivOrder > 1` 모델인 경우 C# 런타임의 동등 차수 미분 재현 여부를 별도 확인 (미확인 시 ⚠️)
+10. **SavitzkyGolayProcessor 수식 패리티** 확인:  <!-- AI가 수정함: 누락 항목 추가 -->
+    - `ComputeSGCoefficients()` Vandermonde pseudoinverse가 scipy SG coefficients와 수학적으로 동치인지 확인
+    - `ComputeEdgeWeights()` 경계 처리가 scipy `mode='interp'` 방식인지 확인
+    - even→odd window 보정 로직 동일 여부 확인
+    - `length < windowSize` 처리 방식 확인 (스킵 vs 예외)
+11. **MinSubProcessor 패리티** 확인:  <!-- AI가 수정함: 누락 항목 추가 -->
+    - per-spectrum min 차감 방향 (행 단위) 일치 여부
+12. **AbsorbanceProcessor standalone 패리티** 확인:  <!-- AI가 수정함: 누락 항목 추가 -->
+    - epsilon 값 (1e-6) 및 `-log10(max(R, eps))` 공식 일치 여부
+    - C# pipeline 내 등록 순서 (CalibrationProcessor 다음, PrepChain 이전) 확인
+13. **LinearClassifier 분류 라우팅** 확인:  <!-- AI가 수정함: 누락 항목 추가 -->
+    - 각 OriginalType별 분기 경로 (ArgMaxOnly / SoftmaxAndThreshold / PlsThreshold) 매핑 확인
+    - Binary Ridge가 ArgMaxOnly 경로에 있는지 확인 (M-1 패치 반영 여부)
+    - Binary LogReg/LDA의 SoftmaxAndThreshold 0.75 threshold 비대칭 정책 문서화
+14. 잠재적 패리티 위험 목록 출력
+15. `DerivOrder > 1` 모델인 경우 C# 런타임의 동등 차수 미분 재현 여부를 별도 확인 (미확인 시 ⚠️)
 
 ## 출력 형식
 
@@ -180,6 +281,32 @@ if (std > 1e-9) { ... }
 - 상태: ✅ 안전 / ⚠️ 주의 / ❌ 위험
 
 [apply_l2_norm ↔ L2NormalizeProcessor]
+- 상태: ✅ 안전 / ⚠️ 주의 / ❌ 위험
+
+[apply_min_subtraction ↔ MinSubProcessor]  <!-- AI가 수정함: 누락 항목 추가 -->
+- per-spectrum 방향 일치: ✅ / ❌
+- 상태: ✅ 안전 / ⚠️ 주의 / ❌ 위험
+
+[apply_savgol ↔ SavitzkyGolayProcessor]  <!-- AI가 수정함: 누락 항목 추가 -->
+- Vandermonde pseudoinverse 수식 패리티: ✅ / ❌
+- scipy mode='interp' 경계 처리: ✅ / ❌
+- even→odd 보정: ✅ / ❌
+- length < windowSize 처리: C# 스킵 정책 / Python ValueError — 런타임 영향: ...
+- 상태: ✅ 안전 / ⚠️ 주의 / ❌ 위험
+
+[apply_absorbance standalone ↔ AbsorbanceProcessor]  <!-- AI가 수정함: 누락 항목 추가 -->
+- epsilon: Python 1e-6 / C# 1e-6
+- 공식 일치: -log10(max(R, eps)) ✅ / ❌
+- Pipeline 내 위치 (PrepChain 이전): ✅ / ❌
+- 상태: ✅ 안전 / ⚠️ 주의 / ❌ 위험
+
+[분류 라우팅 ↔ LinearClassifier.Predict()]  <!-- AI가 수정함: 누락 항목 추가 -->
+- Ridge binary: ArgMaxOnly (Unknown 없음) ✅ / ❌
+- LogReg/LDA binary: SoftmaxAndThreshold (0.75 threshold) ✅ / ⚠️
+- SVC binary: ArgMaxOnly ✅ / ❌
+- PLS-DA binary: PlsThreshold ✅ / ❌
+- Ridge→ArgMax 패치 반영 여부: ✅ / ❌
+- 비대칭 정책 (Ridge/SVC: Unknown 없음 vs LogReg/LDA: Unknown 가능): 문서화됨 / ⚠️ 미문서
 - 상태: ✅ 안전 / ⚠️ 주의 / ❌ 위험
 
 [RequiredRawBands 계산]
@@ -217,3 +344,5 @@ if (std > 1e-9) { ... }
 - LogGap 공식은 현재 기준 `log10(target/gap)`가 정답. 반대 방향 발견 시 즉시 ❌ 위험으로 보고
 - `DerivOrder > 1` 모델은 C# 런타임의 차수 재현 경로를 별도 검증하기 전까지 기본적으로 감시 대상으로 분류
 - RawGap/LogGap에서 clamp fallback 로그가 발생하면 `RequiredRawBands` 생성/매핑 불일치 가능성으로 즉시 점검
+- SavitzkyGolay: `length < windowSize` 런타임 조건 발생 시 C#은 스펙트럼을 무처리로 통과. 배치 안에 혼재 가능성 경고  <!-- AI가 수정함: 누락 주의사항 추가 -->
+- Binary 분류 라우팅: Ridge/SVC→ArgMax(Unknown 없음), LogReg/LDA→SoftmaxAndThreshold(0.75 threshold Unknown 가능). 이 비대칭은 의도적 설계이며 M-1 수정(2026-04-20) 이후 상태가 정답임  <!-- AI가 수정함: 누락 주의사항 추가 -->
