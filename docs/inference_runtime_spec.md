@@ -95,24 +95,24 @@
 > `Weights[0] = -Weights[1]`, `Bias[0] = -Bias[1]` 는 2-class 전개의 불변 조건.  
 > argmax(class0_score, class1_score) ≡ sklearn decision\_function 부호 판정.
 
-**⚠️ C# 분류기 라우팅에 따른 confidence zone 차이**  <!-- AI가 수정함: confidence zone 설명 추가 (2026-04-20) -->
+**⚠️ C# 분류기 라우팅에 따른 confidence zone 차이**  <!-- AI가 수정함: SoftmaxAndThreshold 통일 반영 (2026-04-20) -->
 
-Binary 2-class 전개 시 C# `LinearClassifier.Predict()`의 라우팅 경로에 따라 sklearn과 결과가 차이날 수 있다.
+Binary 2-class 전개 시 C# `LinearClassifier.Predict()`의 라우팅은 **모든 비-PLS 선형 모델이 `SoftmaxAndThreshold`로 통일**됐다 (2026-04-20 통일 후).
 
 `z = w·x + b` (sklearn의 `decision_function` 값) 라 할 때:
 
 | OriginalType | C# 경로 | 분류 경계 | Confidence zone |
 |---|---|---|---|
-| `RidgeClassifier` | `ArgMaxOnly` | z = 0 (sklearn과 동일) | 없음 — 항상 class 반환 |
-| `LinearSVC` | `ArgMaxOnly` | z = 0 (sklearn과 동일) | 없음 — 항상 class 반환 |
-| `LogisticRegression` | `SoftmaxAndThreshold(0.75)` | z = 0 (동일) | `0 < |z| < log(3)/2 ≈ 0.55` 구간에서 Unknown(-1) |
-| `LinearDiscriminantAnalysis` | `SoftmaxAndThreshold(0.75)` | z = 0 (동일) | `0 < |z| < log(3)/2 ≈ 0.55` 구간에서 Unknown(-1) |
+| `RidgeClassifier` | `SoftmaxAndThreshold(설정값, 기본 0.5)` | z = 0 (sklearn과 동일) | threshold=0.5 시 없음 — 항상 class 반환 |
+| `LinearSVC` | `SoftmaxAndThreshold(설정값, 기본 0.5)` | z = 0 (sklearn과 동일) | threshold=0.5 시 없음 — 항상 class 반환 |
+| `LogisticRegression` | `SoftmaxAndThreshold(설정값, 기본 0.5)` | z = 0 (동일) | threshold>0.5 시: `sigmoid(2\|z\|) < threshold` 구간에서 Unknown(-1) |
+| `LinearDiscriminantAnalysis` | `SoftmaxAndThreshold(설정값, 기본 0.5)` | z = 0 (동일) | threshold>0.5 시: `sigmoid(2\|z\|) < threshold` 구간에서 Unknown(-1) |
 
-**근거**: `softmax([-z, +z])[1] = sigmoid(2z)`. `sigmoid(2z) ≥ 0.75` iff `z ≥ log(3)/2 ≈ 0.55`.  
-따라서 sklearn이 class를 반환하는 `0 < z < 0.55` 구간에서 C#은 **Unknown(-1)** 을 반환한다.
+**근거**: `softmax([-z, +z])[1] = sigmoid(2z)`. threshold=0.5이면 `sigmoid(2z) ≥ 0.5` iff `z ≥ 0` → 경계 이쪽만 class, 반대쪽 Unknown. 그러나 2-class 전개에서 argmax = sign(z) 이므로 결국 항상 class 반환 (Unknown 없음).  
+threshold > 0.5이면 confidence zone `0 < |z| < log(threshold/(1−threshold))/2` 에서 Unknown(-1) 반환.
 
-분류 경계(z=0) 자체는 동일하므로 확신도가 높은 픽셀은 sklearn과 동일하게 분류된다. 이 차이는 런타임이 불확실 픽셀에 Unknown을 거는 **설계 의도**이며 버그가 아니다.  
-확신도 임계값은 `LinearClassifier.SetThreshold(double)` API로 조정 가능하다.
+분류 경계(z=0)는 threshold 값과 무관하게 sklearn과 동일.  
+threshold는 `LinearClassifier.SetThreshold(double)` / UI Confidence 슬라이더(0.5~1.0)로 조정 가능.
 
 **Multiclass 예시 (LogisticRegression, IsMultiClass=true, 3 classes):**
 
