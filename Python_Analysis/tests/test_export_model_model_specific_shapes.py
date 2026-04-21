@@ -1,19 +1,18 @@
 """
 D. Model-specific Weights / Bias / IsMultiClass shape regression tests.
 
-계약 (learning_service.py exporter):
-- binary linear models (SVC/LDA/Ridge/LogReg, coef_.shape[0] == 1):
-    Weights = list[float]  (1D, length == n_selected_bands)
-    Bias    = float
-    IsMultiClass = False
-- multiclass linear models (coef_.shape[0] > 1):
+계약 (learning_service.py exporter, parity-fix1 이후):
+- binary linear models (SVC/LDA/Ridge/LogReg):
+    Weights = list[list[float]]  (2D, 2 × n_selected_bands) — [[-w...], [+w...]]
+    Bias    = list[float]        (length == 2)               — [-b, +b]
+    IsMultiClass = True
+- multiclass linear models (n_classes > 2):
     Weights = list[list[float]]  (shape: n_classes × n_selected_bands)
     Bias    = list[float]        (length == n_classes)
     IsMultiClass = True
-- PLS-DA: always multiclass representation (export_coef_.shape[0] > 1 even for 2 classes)
+- PLS-DA: always multiclass representation (export_coef_.shape[0] == n_classes)
 
-주의: LogisticRegression은 train_model()을 경유하면 binary case에서
-      assert coef_.shape[0] == len(np.unique(y))가 실패하므로 직접 fit한다.
+AI가 수정함: parity-fix1 binary 2D 계약으로 업데이트 (2026-04-21)
 """
 import json
 import os
@@ -81,11 +80,15 @@ class TestLinearSVCShapes:
         model = LinearSVC(dual=False, max_iter=2000).fit(X, y)
         with tempfile.TemporaryDirectory() as tmpdir:
             data = _export(model, _bands(n), total_bands=20, tmpdir=tmpdir)
-        assert isinstance(data["Weights"], list)
-        assert all(isinstance(w, float) for w in data["Weights"])
-        assert len(data["Weights"]) == n
-        assert isinstance(data["Bias"], float)
-        assert data["IsMultiClass"] is False
+        # parity-fix1: binary → 2D 2-class 전개 ([[-w...], [+w...]])
+        weights = data["Weights"]
+        assert isinstance(weights, list)
+        assert all(isinstance(row, list) for row in weights), "Binary Weights must be 2D (list of lists)"
+        assert len(weights) == 2, f"Binary must have 2 rows, got {len(weights)}"
+        assert all(len(row) == n for row in weights)
+        assert isinstance(data["Bias"], list)
+        assert len(data["Bias"]) == 2
+        assert data["IsMultiClass"] is True
 
     def test_multiclass_weights_is_2d_list(self):
         n = 8
@@ -112,17 +115,20 @@ class TestLinearSVCShapes:
 class TestLDAShapes:
 
     def test_binary_lda_is_flat_weights(self):
-        # LDA binary: coef_.shape == (1, n_features) → binary branch
+        # LDA binary: parity-fix1 → 2D 2-class 전개
         n = 8
         X, y = _binary_data(n)
         model = LinearDiscriminantAnalysis().fit(X, y)
         with tempfile.TemporaryDirectory() as tmpdir:
             data = _export(model, _bands(n), total_bands=20, tmpdir=tmpdir)
-        assert isinstance(data["Weights"], list)
-        assert all(isinstance(w, float) for w in data["Weights"])
-        assert len(data["Weights"]) == n
-        assert isinstance(data["Bias"], float)
-        assert data["IsMultiClass"] is False
+        weights = data["Weights"]
+        assert isinstance(weights, list)
+        assert all(isinstance(row, list) for row in weights), "Binary LDA Weights must be 2D"
+        assert len(weights) == 2, f"Binary must have 2 rows, got {len(weights)}"
+        assert all(len(row) == n for row in weights)
+        assert isinstance(data["Bias"], list)
+        assert len(data["Bias"]) == 2
+        assert data["IsMultiClass"] is True
 
     def test_multiclass_lda_is_2d_weights(self):
         n = 8
@@ -154,11 +160,15 @@ class TestRidgeClassifierShapes:
         model = RidgeClassifier(class_weight="balanced").fit(X, y)
         with tempfile.TemporaryDirectory() as tmpdir:
             data = _export(model, _bands(n), total_bands=20, tmpdir=tmpdir)
-        assert isinstance(data["Weights"], list)
-        assert all(isinstance(w, float) for w in data["Weights"])
-        assert len(data["Weights"]) == n
-        assert isinstance(data["Bias"], float)
-        assert data["IsMultiClass"] is False
+        # parity-fix1: binary → 2D 2-class 전개
+        weights = data["Weights"]
+        assert isinstance(weights, list)
+        assert all(isinstance(row, list) for row in weights), "Binary Ridge Weights must be 2D"
+        assert len(weights) == 2, f"Binary must have 2 rows, got {len(weights)}"
+        assert all(len(row) == n for row in weights)
+        assert isinstance(data["Bias"], list)
+        assert len(data["Bias"]) == 2
+        assert data["IsMultiClass"] is True
 
     def test_multiclass_ridge_is_2d_weights(self):
         n = 8
@@ -187,18 +197,21 @@ class TestRidgeClassifierShapes:
 class TestLogisticRegressionShapes:
 
     def test_binary_logreg_is_flat_weights(self):
-        # sklearn binary LogReg: coef_.shape == (1, n_features)
+        # parity-fix1: binary LogReg → 2D 2-class 전개 (sklearn coef_.shape[0]==1 → 2 rows)
         n = 8
         X, y = _binary_data(n)
         model = LogisticRegression(solver="lbfgs", max_iter=1000).fit(X, y)
         assert model.coef_.shape[0] == 1, "precondition: binary coef_ must have 1 row"
         with tempfile.TemporaryDirectory() as tmpdir:
             data = _export(model, _bands(n), total_bands=20, tmpdir=tmpdir)
-        assert isinstance(data["Weights"], list)
-        assert all(isinstance(w, float) for w in data["Weights"])
-        assert len(data["Weights"]) == n
-        assert isinstance(data["Bias"], float)
-        assert data["IsMultiClass"] is False
+        weights = data["Weights"]
+        assert isinstance(weights, list)
+        assert all(isinstance(row, list) for row in weights), "Binary LogReg Weights must be 2D"
+        assert len(weights) == 2, f"Binary must have 2 rows, got {len(weights)}"
+        assert all(len(row) == n for row in weights)
+        assert isinstance(data["Bias"], list)
+        assert len(data["Bias"]) == 2
+        assert data["IsMultiClass"] is True
 
     def test_multiclass_logreg_is_2d_weights(self):
         n = 8
@@ -296,7 +309,9 @@ class TestLogisticRegressionBinaryTrainModel:
         assert "TrainAccuracy" in metrics
 
     def test_binary_train_model_export_produces_valid_shape(self):
-        """Binary LogReg export via train_model() path must yield flat Weights and scalar Bias."""
+        """Binary LogReg export via train_model() path must yield 2D Weights and list Bias.
+        AI가 수정함: parity-fix1 binary 2D 계약으로 업데이트 (2026-04-21)
+        """
         n = 8
         X, y = _binary_data(n)
         svc = LearningService()
@@ -304,14 +319,16 @@ class TestLogisticRegressionBinaryTrainModel:
         with tempfile.TemporaryDirectory() as tmpdir:
             data = _export(model, _bands(n), total_bands=20, tmpdir=tmpdir)
 
-        assert data["IsMultiClass"] is False
+        assert data["IsMultiClass"] is True
         weights = data["Weights"]
         assert isinstance(weights, list)
-        assert all(isinstance(w, float) for w in weights), (
-            "Binary Weights must be list[float], not list[list]"
+        assert all(isinstance(row, list) for row in weights), (
+            "Binary Weights must be list[list[float]] (2D), not list[float]"
         )
-        assert len(weights) == n
-        assert isinstance(data["Bias"], float)
+        assert len(weights) == 2, f"Binary export must produce 2 rows, got {len(weights)}"
+        assert all(len(row) == n for row in weights)
+        assert isinstance(data["Bias"], list)
+        assert len(data["Bias"]) == 2
 
     def test_binary_train_model_returns_accuracy_in_range(self):
         """Binary LogReg train accuracy must be in [0, 100] range."""

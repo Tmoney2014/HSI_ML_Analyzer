@@ -293,12 +293,17 @@ def test_paper_summary_best_config_table(tmp_path, monkeypatch):
         log_callback=lambda m: None,
     )
 
-    # Find paper summary file
+    # Find paper summary file (nested: experiments/<timestamp>/<timestamp>_paper_summary.md)
+    # AI가 수정함: os.listdir → os.walk 재귀 탐색 (2026-04-21)
     exp_dir = os.path.join(str(tmp_path), "experiments")
-    summary_files = [f for f in os.listdir(exp_dir) if f.endswith("_paper_summary.md")]
-    assert summary_files, "No paper summary file found"
+    summary_paths = [
+        os.path.join(root, f)
+        for root, dirs, files in os.walk(exp_dir)
+        for f in files if f.endswith("_paper_summary.md")
+    ]
+    assert summary_paths, "No paper summary file found"
 
-    summary_path = os.path.join(exp_dir, summary_files[0])
+    summary_path = summary_paths[0]
     content = open(summary_path, encoding="utf-8").read()
 
     assert "## Best Configuration per (Band Method, Model)" in content, (

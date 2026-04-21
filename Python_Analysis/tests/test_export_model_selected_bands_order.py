@@ -111,7 +111,9 @@ class TestWeightColumnsReorderedWithSortedBands:
         np.testing.assert_allclose(weights, expected_weights)
 
     def test_binary_weights_reordered(self):
-        """Binary SVM: 1D weights도 정렬된 밴드 순서로 재배치됨."""
+        """Binary SVM: parity-fix1 이후 2D weights[1] (+w row)가 정렬된 밴드 순서로 재배치됨.
+        AI가 수정함: binary 2D 계약 반영 (2026-04-21)
+        """
         n_features = 5
         X, y = _binary_data(n_features)
         model = LinearSVC(dual=False, max_iter=2000).fit(X, y)
@@ -122,13 +124,16 @@ class TestWeightColumnsReorderedWithSortedBands:
         with tempfile.TemporaryDirectory() as tmpdir:
             data = _export(model, original_order, total_bands=20, tmpdir=tmpdir)
 
-        weights = np.array(data["Weights"])  # 1D for binary
+        weights = np.array(data["Weights"])  # (2, n_features) for binary
 
         band_to_col = {b: i for i, b in enumerate(original_order)}
         expected_col_order = [band_to_col[b] for b in sorted_order]
-        expected_weights = model.coef_[0][expected_col_order]
+        # weights[1] = +raw_coef reordered, weights[0] = -raw_coef reordered
+        expected_pos_row = model.coef_[0][expected_col_order]
 
-        np.testing.assert_allclose(weights, expected_weights)
+        assert weights.shape == (2, n_features), f"Binary weights must be (2, n_features), got {weights.shape}"
+        np.testing.assert_allclose(weights[1], expected_pos_row)
+        np.testing.assert_allclose(weights[0], -expected_pos_row)
 
     def test_lda_multiclass_weights_reordered(self):
         """Multiclass LDA: weights 열이 정렬된 밴드 순서로 재배치됨."""
