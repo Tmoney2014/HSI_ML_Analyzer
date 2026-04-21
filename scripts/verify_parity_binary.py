@@ -48,10 +48,10 @@ def assert_pls_binary(result, case_name):
     mc = result.get('IsMultiClass')
     assert isinstance(w, list), f"{case_name}: Weights must be list"
     assert isinstance(w[0], list), f"{case_name}: Weights[0] must be list (nested)"
-    assert len(w) == 1, f"{case_name}: PLS-DA binary Weights must have 1 row"
+    assert len(w) == 2, f"{case_name}: PLS-DA binary Weights must have 2 rows, got {len(w)}"
     assert isinstance(b, list), f"{case_name}: Bias must be list"
-    assert len(b) == 1, f"{case_name}: PLS-DA binary Bias must have 1 element"
-    assert mc is False, f"{case_name}: PLS-DA IsMultiClass must be False"
+    assert len(b) == 2, f"{case_name}: PLS-DA binary Bias must have 2 elements, got {len(b)}"
+    assert mc is True, f"{case_name}: PLS-DA binary IsMultiClass must be True, got {mc}"
 
 
 def run_export(model_type, X, y, bands):
@@ -60,8 +60,7 @@ def run_export(model_type, X, y, bands):
         model, metrics = svc.train_model(X, y, model_type=model_type, test_ratio=0.2, log_callback=lambda _msg: None)
 
     if model_type == 'PLS-DA':
-        model.export_coef_ = model.export_coef_[:1]
-        model.export_intercept_ = model.export_intercept_[:1]
+        pass  # export_coef_ shape is always (n_classes, n_features) — no manual slicing needed
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = os.path.join(tmpdir, 'model.json')

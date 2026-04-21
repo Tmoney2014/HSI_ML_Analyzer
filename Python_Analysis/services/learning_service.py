@@ -432,21 +432,21 @@ class LearningService:
             # Use our monkey-patched attributes
             if hasattr(model, 'export_coef_') and hasattr(model, 'export_intercept_'):
                 # export_coef_ is (n_classes, n_features)
-                if model.export_coef_.shape[0] > 1:
-                    weights = model.export_coef_.tolist()
-                    bias = model.export_intercept_.tolist()
-                    is_multiclass = True
-                else: 
-                    # Generally PLS-DA with >2 classes is multiclass
-                    if model.export_coef_.shape[0] == 1:
-                        # AI가 수정함: C-1 패리티 픽스 — PLS-DA binary도 nested list로 감싸기 (2026-04-20)
-                        weights = [model.export_coef_[0].tolist()]   # [[f0, f1, ...]]
-                        bias = [float(model.export_intercept_[0])]   # [b0]
-                        is_multiclass = False
-                    else:
-                        weights = model.export_coef_.tolist()
-                        bias = model.export_intercept_.tolist()
-                        is_multiclass = True
+                # AI가 수정함: M1+M2 패리티 픽스 — dead shape[0]==1 branch 제거 + col_order 추가 (2026-04-21)
+                raw_coef = model.export_coef_  # shape: (n_classes, n_features_original)
+                if original_bands != selected_bands:
+                    band_to_col = {int(b): i for i, b in enumerate(original_bands)}
+                    col_order = [band_to_col[b] for b in selected_bands if b in band_to_col]
+                    if len(col_order) != len(selected_bands):
+                        raise ValueError(
+                            f"export_model: PLS weight column reorder mismatch — "
+                            f"col_order len={len(col_order)} != selected_bands len={len(selected_bands)}. "
+                            f"Ensure original_bands covers all values in selected_bands before dedup."
+                        )
+                    raw_coef = raw_coef[:, col_order]
+                weights = [row.tolist() for row in raw_coef]
+                bias = model.export_intercept_.tolist()
+                is_multiclass = True
             else:
                  print("   [Warning] PLS Model missing export attributes.")
         
