@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QProgressBar, QTextEdit, QLabel,
     QGroupBox, QHBoxLayout, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox,
     QFileDialog, QSplitter, QTreeWidget, QTreeWidgetItem, QListWidget,
-    QListWidgetItem, QFormLayout, QToolButton
+    QListWidgetItem, QFormLayout, QToolButton, QCheckBox
 )
 from PyQt5.QtCore import Qt
 from viewmodels.training_vm import TrainingViewModel
@@ -82,6 +82,27 @@ class TabTraining(QWidget):
         self.combo_band_method.addItems(["SPA", "Full Band", "ANOVA-F", "SPA-LDA Fast", "SPA-LDA Greedy", "LDA-coef"])
         self.combo_band_method.setToolTip("Band selection used by Train / Find Best Params. Export Matrix uses its own multi-select list below.")
         form_run.addRow("Band Selection", self.combo_band_method)
+
+        # Band Focus Range
+        self.chk_band_focus = QCheckBox()
+        self.chk_band_focus.setToolTip("학습에 사용할 RAW 밴드 구간. 범위 밖 밴드는 제외됩니다.")
+        self.spin_band_focus_start = QSpinBox()
+        self.spin_band_focus_start.setRange(0, 500)
+        self.spin_band_focus_start.setValue(105)
+        self.spin_band_focus_end = QSpinBox()
+        self.spin_band_focus_end.setRange(0, 500)
+        self.spin_band_focus_end.setValue(147)
+        focus_row = QWidget()
+        focus_layout = QHBoxLayout(focus_row)
+        focus_layout.setContentsMargins(0, 0, 0, 0)
+        focus_layout.setSpacing(4)
+        focus_layout.addWidget(self.chk_band_focus)
+        focus_layout.addWidget(QLabel("Start:"))
+        focus_layout.addWidget(self.spin_band_focus_start)
+        focus_layout.addWidget(QLabel("~"))
+        focus_layout.addWidget(self.spin_band_focus_end)
+        focus_layout.addStretch(1)
+        form_run.addRow("Band Focus", focus_row)
 
         quick_layout.addLayout(form_run)
         grp_quick.setLayout(quick_layout)
@@ -367,10 +388,16 @@ class TabTraining(QWidget):
         if enabled:
             self.spin_bands.setEnabled(self.vm.band_selection_method != "full")
             self._update_gap_widgets_enabled()
+            self.chk_band_focus.setEnabled(True)
+            self.spin_band_focus_start.setEnabled(getattr(self.vm, 'band_focus_enabled', False))
+            self.spin_band_focus_end.setEnabled(getattr(self.vm, 'band_focus_enabled', False))
         else:
             self.spin_bands.setEnabled(False)
             self.spin_experiment_gap_min.setEnabled(False)
             self.spin_experiment_gap_max.setEnabled(False)
+            self.chk_band_focus.setEnabled(False)
+            self.spin_band_focus_start.setEnabled(False)
+            self.spin_band_focus_end.setEnabled(False)
 
     def on_start_click(self):
         self.log_text.clear()
@@ -430,6 +457,20 @@ class TabTraining(QWidget):
             self.spin_experiment_gap_min.setValue(getattr(self.vm, 'experiment_gap_min', 1))
             self.spin_experiment_gap_max.setValue(getattr(self.vm, 'experiment_gap_max', 20))
             for w in _spin_blocked: w.blockSignals(False)
+
+            # Band Focus Range
+            self.chk_band_focus.blockSignals(True)
+            self.spin_band_focus_start.blockSignals(True)
+            self.spin_band_focus_end.blockSignals(True)
+            self.chk_band_focus.setChecked(getattr(self.vm, 'band_focus_enabled', False))
+            self.spin_band_focus_start.setValue(getattr(self.vm, 'band_focus_start', 105))
+            self.spin_band_focus_end.setValue(getattr(self.vm, 'band_focus_end', 147))
+            _focus_enabled = getattr(self.vm, 'band_focus_enabled', False)
+            self.spin_band_focus_start.setEnabled(_focus_enabled)
+            self.spin_band_focus_end.setEnabled(_focus_enabled)
+            self.chk_band_focus.blockSignals(False)
+            self.spin_band_focus_start.blockSignals(False)
+            self.spin_band_focus_end.blockSignals(False)
         finally:
             self._set_form_signal_blocking(False)
 
@@ -524,6 +565,10 @@ class TabTraining(QWidget):
         self.spin_experiment_gap_min.valueChanged.connect(self._on_experiment_gap_changed)
         self.spin_experiment_gap_max.valueChanged.connect(self._on_experiment_gap_changed)
         self.list_experiment_band_methods.itemChanged.connect(self._on_experiment_band_method_changed)
+        # Band Focus Range
+        self.chk_band_focus.stateChanged.connect(self._on_band_focus_changed)
+        self.spin_band_focus_start.valueChanged.connect(self._on_band_focus_range_changed)
+        self.spin_band_focus_end.valueChanged.connect(self._on_band_focus_range_changed)
 
     def _restore_checked_items(self, list_widget, selected_values):
         selected_set = set(selected_values or [])
@@ -593,6 +638,18 @@ class TabTraining(QWidget):
         checked_methods = self._get_checked_values(self.list_experiment_band_methods)
         self.lbl_experiment_spa_greedy_warning.setVisible("spa_lda_greedy" in checked_methods)
         self._update_gap_widgets_enabled()
+
+    def _on_band_focus_changed(self, state):
+        enabled = (state == Qt.Checked)
+        self.vm.band_focus_enabled = enabled
+        self.spin_band_focus_start.setEnabled(enabled)
+        self.spin_band_focus_end.setEnabled(enabled)
+        self.vm.config_changed.emit()
+
+    def _on_band_focus_range_changed(self):
+        self.vm.band_focus_start = self.spin_band_focus_start.value()
+        self.vm.band_focus_end   = self.spin_band_focus_end.value()
+        self.vm.config_changed.emit()
 
     def _update_gap_widgets_enabled(self):  # AI가 수정함: prep_chain에 SimpleDeriv 없으면 gap 위젯 비활성화
         """Enable gap spinboxes only when SimpleDeriv is active in the prep chain."""

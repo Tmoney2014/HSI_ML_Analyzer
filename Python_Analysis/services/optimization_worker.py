@@ -42,6 +42,11 @@ class OptimizationWorker(QObject):
         
         # AI가 추가함: 제외 파일 목록
         self.excluded_files = initial_params.get('excluded_files', set())
+
+        # Band Focus Range
+        self.band_focus_enabled = initial_params.get('band_focus_enabled', False)
+        self.band_focus_start   = initial_params.get('band_focus_start', 0)
+        self.band_focus_end     = initial_params.get('band_focus_end', 999)
         
         self.model_type = model_type
         self.band_methods = band_methods if band_methods is not None else [initial_params.get('band_selection_method', 'spa')]  # AI가 수정함: band_methods 목록 (복수)
@@ -292,6 +297,16 @@ class OptimizationWorker(QObject):
             _upper_limit = n_bands - _upper_offset
             if 0 < _upper_limit < n_bands:
                 exclude_indices = list(set(exclude_indices) | set(range(_upper_limit, n_bands)))
+
+        # Band Focus Range
+        if self.band_focus_enabled and self.raw_band_count > 0:
+            outside_raw = [i for i in range(self.raw_band_count)
+                           if not (self.band_focus_start <= i <= self.band_focus_end)]
+            focus_excludes = ProcessingService.map_raw_excludes_to_processed_indices(
+                outside_raw, self.raw_band_count, prep_chain
+            )
+            focus_excludes = [i for i in focus_excludes if 0 <= i < n_bands]
+            exclude_indices = list(set(exclude_indices) | set(focus_excludes))
 
         # Use Full Data for SPA (User Request: No Downsampling)
         dummy = X.reshape(-1, 1, X.shape[1])

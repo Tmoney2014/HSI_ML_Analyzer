@@ -59,6 +59,11 @@ class ExperimentWorker(QObject):  # AI가 수정함: QObject 상속 (QThread 아
         self.test_ratio = params.get('test_ratio', 0.2)          # AI가 수정함: 테스트 분리 비율
         self.output_dir = params.get('output_dir', 'output/experiments')  # AI가 수정함: CSV 저장 디렉토리
         self.excluded_files = params.get('excluded_files', set())  # AI가 수정함: 제외 파일 집합
+
+        # Band Focus Range
+        self.band_focus_enabled = params.get('band_focus_enabled', False)
+        self.band_focus_start   = params.get('band_focus_start', 0)
+        self.band_focus_end     = params.get('band_focus_end', 999)
         self.raw_band_count = int(params.get('raw_band_count', 0) or 0)  # AI가 추가함: authoritative RAW sensor band count
         self.band_selection_method = params.get('band_selection_method', 'spa')  # AI가 수정함: 단일 밴드 선택 방법 (미사용 — band_methods 우선)
 
@@ -93,6 +98,15 @@ class ExperimentWorker(QObject):  # AI가 수정함: QObject 상속 (QThread 아
             exclude_indices = ProcessingService.map_raw_excludes_to_processed_indices(
                 raw_exclude_indices, self.raw_band_count, self.base_prep_chain
             )
+
+            # Band Focus Range
+            if self.band_focus_enabled and self.raw_band_count > 0:
+                outside_raw = [i for i in range(self.raw_band_count)
+                               if not (self.band_focus_start <= i <= self.band_focus_end)]
+                focus_excludes = ProcessingService.map_raw_excludes_to_processed_indices(
+                    outside_raw, self.raw_band_count, self.base_prep_chain
+                )
+                exclude_indices = list(set(exclude_indices) | set(focus_excludes))
 
             # AI가 수정함: Step 3 — ExperimentRunner.run_grid 호출
             # AI가 수정함: progress bar용 총 trial 수 사전 계산 (근사치)

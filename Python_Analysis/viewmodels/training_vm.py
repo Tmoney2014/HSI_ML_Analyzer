@@ -51,6 +51,11 @@ class TrainingViewModel(QObject):
         self.experiment_n_bands_list: list = [self.n_features]  # AI가 추가함: 실험 그리드 n_bands 목록 (기본: 현재 n_features)
         self.experiment_gap_min: int = 1   # AI가 추가함: 실험 그리드 gap 범위 최솟값
         self.experiment_gap_max: int = 20  # AI가 추가함: 실험 그리드 gap 범위 최댓값
+
+        # Band Focus Range
+        self.band_focus_enabled = False
+        self.band_focus_start   = 105
+        self.band_focus_end     = 147
         
         # Threading state
         self.worker_thread = None
@@ -103,7 +108,11 @@ class TrainingViewModel(QObject):
             "experiment_gap_min": self.experiment_gap_min,  # AI가 추가함: 실험 그리드 gap 최솟값 저장
             "experiment_gap_max": self.experiment_gap_max,  # AI가 추가함: 실험 그리드 gap 최댓값 저장
             # AI가 추가함: 제외 목록 저장 (list로 변환)
-            "excluded_files": list(self.excluded_files)
+            "excluded_files": list(self.excluded_files),
+            # Band Focus Range
+            "band_focus_enabled": self.band_focus_enabled,
+            "band_focus_start":   self.band_focus_start,
+            "band_focus_end":     self.band_focus_end,
         }
 
     def set_config(self, config: dict):
@@ -173,7 +182,12 @@ class TrainingViewModel(QObject):
             self.excluded_files = set(config["excluded_files"])
         else:
             self.excluded_files = set()
-            
+
+        # Band Focus Range
+        self.band_focus_enabled = config.get("band_focus_enabled", False)
+        self.band_focus_start   = config.get("band_focus_start", 105)
+        self.band_focus_end     = config.get("band_focus_end", 147)
+
         self.config_changed.emit()
 
     def set_file_excluded(self, path: str, excluded: bool):
@@ -354,6 +368,10 @@ class TrainingViewModel(QObject):
             'excluded_files': self.excluded_files.copy(),
             'band_selection_method': self.band_selection_method,  # AI가 수정함: 하드코딩 제거
             'raw_band_count': raw_band_count,
+            # Band Focus Range
+            'band_focus_enabled': self.band_focus_enabled,
+            'band_focus_start':   self.band_focus_start,
+            'band_focus_end':     self.band_focus_end,
         }
         
         # 4. Create Thread
@@ -495,6 +513,10 @@ class TrainingViewModel(QObject):
             'excluded_files': self.excluded_files.copy(),
             'band_selection_method': self.band_selection_method,  # AI가 수정함: 하드코딩 제거
             'raw_band_count': raw_band_count,
+            # Band Focus Range
+            'band_focus_enabled': self.band_focus_enabled,
+            'band_focus_start':   self.band_focus_start,
+            'band_focus_end':     self.band_focus_end,
         }
         
         # 3. Create Worker & Thread
@@ -614,6 +636,10 @@ class TrainingViewModel(QObject):
             'excluded_files': self.excluded_files.copy(),
             'band_selection_method': self.band_selection_method,
             'raw_band_count': raw_band_count,
+            # Band Focus Range
+            'band_focus_enabled': self.band_focus_enabled,
+            'band_focus_start':   self.band_focus_start,
+            'band_focus_end':     self.band_focus_end,
         }
         self.exp_thread = QThread()
         groups_copy = {k: list(v) for k, v in self.main_vm.file_groups.items()}

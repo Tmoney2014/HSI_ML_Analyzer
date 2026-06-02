@@ -46,6 +46,11 @@ class TrainingWorker(QObject):
         # AI가 추가함: 제외 파일 목록
         self.excluded_files = params.get('excluded_files', set())
 
+        # Band Focus Range
+        self.band_focus_enabled = params.get('band_focus_enabled', False)
+        self.band_focus_start   = params.get('band_focus_start', 0)
+        self.band_focus_end     = params.get('band_focus_end', 999)
+
     def run(self):
         try:
             # 1. Setup & Validation
@@ -124,6 +129,37 @@ class TrainingWorker(QObject):
                     exclude_indices = list(set(exclude_indices) | set(range(_upper_limit, n_bands)))
                     if not silent:
                         self.log_message.emit(f"   [Band Limit] SPA 상한 제약: 밴드 {_upper_limit}~{n_bands-1} 자동 제외 (offset={_upper_offset})")
+
+            # Band Focus Range: 범위 밖 processed 인덱스를 exclude에 병합
+            if self.band_focus_enabled and self.raw_band_count > 0:
+                outside_raw = [i for i in range(self.raw_band_count)
+                               if not (self.band_focus_start <= i <= self.band_focus_end)]
+                focus_excludes = ProcessingService.map_raw_excludes_to_processed_indices(
+                    outside_raw, self.raw_band_count, self.prep_chain
+                )
+                focus_excludes = [i for i in focus_excludes if 0 <= i < n_bands]
+                exclude_indices = list(set(exclude_indices) | set(focus_excludes))
+                if not silent:
+                    n_usable = n_bands - len(set(i for i in exclude_indices if 0 <= i < n_bands))
+                    self.log_message.emit(
+                        f"[Band Focus] RAW [{self.band_focus_start}~{self.band_focus_end}] "
+                        f"→ 유효 {n_usable}개 밴드"
+                    )
+
+            # 빈 유효 밴드셋 guard
+            valid_count = n_bands - len(set(i for i in exclude_indices if 0 <= i < n_bands))
+            if valid_count <= 0:
+                raise ValueError(
+                    f"Band Focus [{self.band_focus_start}~{self.band_focus_end}] 적용 후 "
+                    f"유효 밴드 0개. 범위를 확인하세요."
+                )
+            if n_features > valid_count:
+                if not silent:
+                    self.log_message.emit(
+                        f"⚠️ n_features({n_features}) > 유효 밴드({valid_count}). "
+                        f"{valid_count}으로 조정합니다."
+                    )
+                n_features = valid_count
 
             # total_bands: authoritative RAW sensor band count (export/runtime parity)
             
